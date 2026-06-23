@@ -43,6 +43,11 @@ class QuiverDetail(BaseModel):
     is_acyclic: bool
     is_connected: bool
     max_edge: int
+    is_bipartite: Optional[bool] = None
+    is_abundant: Optional[bool] = None
+    is_planar: Optional[bool] = None
+    representation_type: Optional[str] = None
+    symmetry_group: Optional[dict] = None
     class_size: Optional[int] = None
     mc_id: Optional[str] = None
     tags: list[str] = []
@@ -70,6 +75,17 @@ class ClassDetail(BaseModel):
     canonical_matrix: Matrix
     canonical_qid: Optional[str] = None
     labeled_quivers: list[LabeledMember] = []
+    is_finite_confirmed: Optional[bool] = None
+    is_infinite_confirmed: Optional[bool] = None
+    is_infinite_expected: Optional[bool] = None
+    size_of_explored_mutation_class: Optional[int] = None
+    size_of_explored_frontier: Optional[int] = None
+    is_mutation_acyclic: Optional[bool] = None
+    is_banff: Optional[bool] = None
+    is_louise: Optional[bool] = None
+    is_p_prime: Optional[bool] = None
+    is_locally_acyclic: Optional[bool] = None
+    provenance: Optional[dict] = None
 
 
 # ---------------------------------------------------------------------------

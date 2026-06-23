@@ -12,7 +12,8 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from qmd import dynkin, models
+from qmd import dynkin, invariants, models
+from qmd import local_acyclicity as la
 from qmd.core import (
     GenerationResult,
     to_lists,
@@ -21,6 +22,14 @@ from qmd.core import (
     is_acyclic,
     is_connected,
 )
+
+_TRI = {"true": True, "false": False, "unknown": None}
+
+
+def _la_bounds(is_open: bool) -> dict:
+    """Search budget: thorough for finite classes (they certify), bounded for open ones."""
+    return dict(max_depth=8, timeout=3, cap=8) if is_open \
+        else dict(max_depth=64, timeout=15, cap=8)
 
 
 # ---------------------------------------------------------------------------
@@ -141,6 +150,11 @@ def get_quiver_detail(db: Session, qid: str) -> Optional[dict]:
         "is_acyclic": q.is_acyclic,
         "is_connected": q.is_connected,
         "max_edge": q.max_edge,
+        "is_bipartite": q.is_bipartite,
+        "is_abundant": q.is_abundant,
+        "is_planar": q.is_planar,
+        "representation_type": q.representation_type,
+        "symmetry_group": q.symmetry_group,
         "class_size": _class_size(mc),
         "mc_id": q.mc_id,
         "tags": [],
@@ -163,6 +177,17 @@ def get_class_detail(db: Session, mc_id: str) -> Optional[dict]:
         "canonical_matrix": mc.canonical_rep,
         "canonical_qid": mc.canonical_qid,
         "labeled_quivers": mc.labeled_quivers,   # [{qmd_id, matrix}, ...]
+        "is_finite_confirmed": mc.is_finite_confirmed,
+        "is_infinite_confirmed": mc.is_infinite_confirmed,
+        "is_infinite_expected": mc.is_infinite_expected,
+        "size_of_explored_mutation_class": mc.labeled_size,
+        "size_of_explored_frontier": mc.size_of_explored_frontier,
+        "is_mutation_acyclic": mc.is_mutation_acyclic,
+        "is_banff": mc.is_banff,
+        "is_louise": mc.is_louise,
+        "is_p_prime": mc.is_p_prime,
+        "is_locally_acyclic": mc.is_locally_acyclic,
+        "provenance": mc.provenance,
     }
 
 
@@ -185,24 +210,53 @@ def upsert_generation_result(db: Session, result: GenerationResult) -> None:
             {"qmd_id": qid, "matrix": to_lists(m)}
             for m, qid in zip(mc_res.labeled_quivers, mc_res.quiver_ids)
         ]
-        dtype = None if mc_res.is_open else dynkin.classify(mc_res.canonical_rep)
+        is_open = mc_res.is_open
+        rep = mc_res.canonical_rep
+        dtype = None if is_open else dynkin.classify(rep)
+
+        bounds = _la_bounds(is_open)
+        b_state, b_w = la.banff_status(rep, **bounds)
+        l_state, l_w = la.louise_status(rep, **bounds)
+        p_state, p_w = la.p_prime_status(rep, **bounds)
+        provenance = {
+            "is_banff":   {"state": b_state, "witness": b_w},
+            "is_louise":  {"state": l_state, "witness": l_w},
+            "is_p_prime": {"state": p_state, "witness": p_w},
+        }
+        if is_open:
+            provenance["is_infinite_confirmed"] = {
+                "method": "Derksen-Owen: a bounded mutation reached |b_ij| >= 3"
+            }
+
         db.merge(models.MutationClass(
             mc_id                 = mc_id,
-            n_vertices            = len(mc_res.canonical_rep),
-            canonical_rep         = to_lists(mc_res.canonical_rep),
-            is_open               = mc_res.is_open,
+            n_vertices            = len(rep),
+            canonical_rep         = to_lists(rep),
+            is_open               = is_open,
             labeled_size          = mc_res.labeled_size,
             distinct_quiver_count = mc_res.distinct_quiver_count,
             merged_orbit_count    = mc_res.merged_orbit_count,
             boundary_quivers      = [to_lists(m) for m in mc_res.boundary_quivers],
-            canonical_qid         = quiver_id(mc_res.canonical_rep),
+            canonical_qid         = quiver_id(rep),
             labeled_quivers       = labeled,
             dynkin_type           = dtype,
             label                 = dtype,
+            is_finite_confirmed   = not is_open,
+            is_infinite_confirmed = is_open,
+            is_infinite_expected  = False,
+            size_of_explored_frontier = len(mc_res.boundary_quivers),
+            is_mutation_acyclic   = invariants.class_is_mutation_acyclic(
+                                        mc_res.labeled_quivers, is_open),
+            is_banff              = _TRI[b_state],
+            is_louise             = _TRI[l_state],
+            is_p_prime            = _TRI[p_state],
+            is_locally_acyclic    = True if b_state == "true" else None,
+            provenance            = provenance,
         ))
 
     # Quivers.
     for qid, matrix in result.quivers.items():
+        qi = invariants.quiver_invariants(matrix)
         db.merge(models.Quiver(
             quiver_id        = qid,
             n_vertices       = len(matrix),
@@ -210,6 +264,11 @@ def upsert_generation_result(db: Session, result: GenerationResult) -> None:
             max_edge         = max_edge(matrix),
             is_acyclic       = is_acyclic(matrix),
             is_connected     = is_connected(matrix),
+            is_bipartite     = qi["is_bipartite"],
+            is_abundant      = qi["is_abundant"],
+            is_planar        = qi["is_planar"],
+            representation_type = qi["representation_type"],
+            symmetry_group   = qi["symmetry_group"],
             mc_id            = result.membership.get(qid),
         ))
 

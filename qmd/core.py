@@ -432,6 +432,7 @@ def _merge_orbits(orbits: list[_RawOrbit]) -> MutationClassResult:
     from the merged labeled set.
     """
     seen_labeled : set[Matrix] = set()
+    seen_boundary: set[Matrix] = set()
     merged_labeled  : list[Matrix] = []
     merged_qids     : list[str]    = []
     merged_boundary : list[Matrix] = []
@@ -444,8 +445,11 @@ def _merge_orbits(orbits: list[_RawOrbit]) -> MutationClassResult:
                 seen_labeled.add(m)
                 merged_labeled.append(m)
                 merged_qids.append(qid)
+        # Boundary quivers are a subset of the labeled set (each is an interior
+        # quiver with an escaping mutation), so dedup them among themselves.
         for b in orbit.boundary_quivers:
-            if b not in seen_labeled:
+            if b not in seen_boundary:
+                seen_boundary.add(b)
                 merged_boundary.append(b)
 
     canon_rep = canonical_class_rep(merged_labeled)
