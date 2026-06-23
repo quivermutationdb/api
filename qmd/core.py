@@ -122,6 +122,63 @@ def is_bounded(matrix: Matrix, bound: int = 2) -> bool:
     return max_edge(matrix) <= bound
 
 
+def is_connected(matrix: Matrix) -> bool:
+    """
+    True iff the underlying undirected graph (an edge wherever b_ij != 0)
+    is connected.  A single-vertex quiver is connected by convention.
+    """
+    n = len(matrix)
+    if n <= 1:
+        return True
+    adj: dict[int, set[int]] = {i: set() for i in range(n)}
+    for i in range(n):
+        for j in range(i + 1, n):
+            if matrix[i][j] != 0:
+                adj[i].add(j)
+                adj[j].add(i)
+    seen = {0}
+    stack = [0]
+    while stack:
+        v = stack.pop()
+        for w in adj[v]:
+            if w not in seen:
+                seen.add(w)
+                stack.append(w)
+    return len(seen) == n
+
+
+def is_acyclic(matrix: Matrix) -> bool:
+    """
+    True iff the quiver (directed edge i -> j whenever b_ij > 0) contains
+    no directed cycle.  Uses iterative DFS three-colouring.
+    """
+    n = len(matrix)
+    adj = {i: [j for j in range(n) if matrix[i][j] > 0] for i in range(n)}
+    WHITE, GRAY, BLACK = 0, 1, 2
+    color = [WHITE] * n
+
+    for start in range(n):
+        if color[start] != WHITE:
+            continue
+        # (vertex, iterator-index) stack for iterative DFS
+        stack: list[tuple[int, int]] = [(start, 0)]
+        color[start] = GRAY
+        while stack:
+            u, idx = stack[-1]
+            if idx < len(adj[u]):
+                stack[-1] = (u, idx + 1)
+                v = adj[u][idx]
+                if color[v] == GRAY:
+                    return False          # back-edge => cycle
+                if color[v] == WHITE:
+                    color[v] = GRAY
+                    stack.append((v, 0))
+            else:
+                color[u] = BLACK
+                stack.pop()
+    return True
+
+
 # ---------------------------------------------------------------------------
 # Mutation
 # ---------------------------------------------------------------------------

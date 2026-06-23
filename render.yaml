@@ -1,0 +1,21 @@
+# Render Blueprint for the Quiver Mutation Database API.
+#
+# Two ways to use this:
+#   1. Render dashboard -> New -> Blueprint -> pick this repo (reads this file).
+#   2. Or create a Web Service manually with the buildCommand / startCommand below.
+#
+# DATABASE_URL is a secret and is NOT stored here; set it in the Render
+# dashboard (use your Neon connection string).
+services:
+  - type: web
+    name: qmd-api
+    runtime: python
+    plan: free                # switch to "starter" for always-on (no cold starts)
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.2"
+      - key: DATABASE_URL
+        sync: false           # set manually in the dashboard (your Neon string)

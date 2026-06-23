@@ -503,7 +503,7 @@ print(f'  Unlabeled quivers:       {len(r4.quivers):>6}')
 print(f'  Mutation classes:        {len(r4.classes):>6}')
 print(f'    Closed (finite-type):  {len(closed4):>6}')
 print(f'    Open:                  {len(r4.classes)-len(closed4):>6}')
-print(f'  Inter-class iso merges:  {r4.iso_merges:>6}')
+print(f'  Open-open gluings:        {r4.open_open_gluings:>6}')
 print(f'  Backend: {active_backend()}')
 print()
 print(f'A3 class: {a3_class.labeled_size} labeled matrices, '
