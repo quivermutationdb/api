@@ -12,7 +12,7 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from qmd import models
+from qmd import dynkin, models
 from qmd.core import (
     GenerationResult,
     to_lists,
@@ -176,8 +176,8 @@ def upsert_generation_result(db: Session, result: GenerationResult) -> None:
     GenerationResult.  Computes per-quiver invariants and persists each
     class's full labeled orbit and canonical quiver id.
 
-    Note: dynkin_type / label are left null here; a future classifier will
-    populate them separately.
+    Finite (closed) classes are labeled with their Dynkin type via qmd.dynkin;
+    open/affine classes are left null.
     """
     # Mutation classes first (quivers FK -> mutation_classes).
     for mc_id, mc_res in result.classes.items():
@@ -185,6 +185,7 @@ def upsert_generation_result(db: Session, result: GenerationResult) -> None:
             {"qmd_id": qid, "matrix": to_lists(m)}
             for m, qid in zip(mc_res.labeled_quivers, mc_res.quiver_ids)
         ]
+        dtype = None if mc_res.is_open else dynkin.classify(mc_res.canonical_rep)
         db.merge(models.MutationClass(
             mc_id                 = mc_id,
             n_vertices            = len(mc_res.canonical_rep),
@@ -196,6 +197,8 @@ def upsert_generation_result(db: Session, result: GenerationResult) -> None:
             boundary_quivers      = [to_lists(m) for m in mc_res.boundary_quivers],
             canonical_qid         = quiver_id(mc_res.canonical_rep),
             labeled_quivers       = labeled,
+            dynkin_type           = dtype,
+            label                 = dtype,
         ))
 
     # Quivers.

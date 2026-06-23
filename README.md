@@ -68,6 +68,10 @@ python -m pytest tests/ -v
 | A3          | 14                  |
 | D4          | 132 (finite type)   |
 
+## Contact
+
+Maintained by Blake Jackson — <blakej@andrew.cmu.edu>
+
 ## License
 
 CC-BY-4.0
