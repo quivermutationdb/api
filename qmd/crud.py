@@ -48,6 +48,7 @@ def _quiver_list_item(q: models.Quiver, mc: Optional[models.MutationClass]) -> d
         "qmd_id": q.quiver_id,
         "num_vertices": q.n_vertices,
         "dynkin_type": mc.dynkin_type if mc else None,
+        "representation_type": q.representation_type,
         "is_open": mc.is_open if mc else False,
         "class_size": _class_size(mc),
         "mc_id": q.mc_id,
@@ -72,6 +73,7 @@ def _filtered_quivers(
     rank: Optional[int] = None,
     is_open: Optional[bool] = None,
     dynkin_type: Optional[str] = None,
+    representation_type: Optional[str] = None,
     max_edge: Optional[int] = None,
     is_acyclic: Optional[bool] = None,
     is_connected: Optional[bool] = None,
@@ -101,6 +103,8 @@ def _filtered_quivers(
         query = query.filter(MC.is_open == (not is_mutation_finite))
     if dynkin_type is not None:
         query = query.filter(MC.dynkin_type == dynkin_type)
+    if representation_type is not None:
+        query = query.filter(Q.representation_type == representation_type)
     if orbit_min is not None:
         query = query.filter(MC.labeled_size >= orbit_min)
     if orbit_max is not None:

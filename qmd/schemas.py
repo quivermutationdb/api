@@ -27,6 +27,7 @@ class QuiverListItem(BaseModel):
     qmd_id: str
     num_vertices: int
     dynkin_type: Optional[str] = None
+    representation_type: Optional[str] = None
     is_open: bool
     class_size: Optional[int] = None       # None => unbounded (rendered as ∞)
     mc_id: Optional[str] = None

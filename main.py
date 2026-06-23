@@ -93,6 +93,7 @@ def get_quiver(quiver_id: str, db: Session = Depends(get_db)):
 def search(
     rank: Optional[int] = None,
     dynkin_type: Optional[str] = None,
+    representation_type: Optional[str] = None,
     max_edge: Optional[int] = None,
     is_open: Optional[bool] = None,
     orbit_min: Optional[int] = None,
@@ -108,6 +109,7 @@ def search(
     filters = {
         "rank": rank,
         "dynkin_type": dynkin_type,
+        "representation_type": representation_type,
         "max_edge": max_edge,
         "is_open": is_open,
         "orbit_min": orbit_min,
