@@ -91,8 +91,17 @@ def _quiver_list_item(q: models.Quiver, mc: Optional[models.MutationClass]) -> d
         "is_bipartite": q.is_bipartite,
         "is_open": mc.is_open if mc else False,
         "class_size": _class_size(mc),
+        "exchange_matrix": q.canonical_matrix,   # labeled rows override this per labeling
         "mc_id": q.mc_id,
     }
+
+
+def _labeling_count(q: models.Quiver, mc: Optional[models.MutationClass]) -> int:
+    """How many labeled matrices in the class map to this unlabeled quiver."""
+    if mc is None or not mc.labeled_quivers:
+        return 1
+    c = sum(1 for e in mc.labeled_quivers if e.get("qmd_id") == q.quiver_id)
+    return c if c else 1
 
 
 # ---------------------------------------------------------------------------
@@ -161,22 +170,52 @@ def list_quivers(
     db: Session,
     *,
     filters: dict,
+    scope: str = "distinct",
     sort: str = "num_vertices",
     direction: str = "asc",
     offset: int = 0,
     limit: int = 50,
-) -> tuple[list[dict], int]:
-    """Return (items, total) for a filtered/sorted/paginated quiver listing."""
-    query = _filtered_quivers(db, **filters)
-    total = query.count()
+) -> tuple[list[dict], int, int, int]:
+    """
+    Return (items, total, distinct_total, labeled_total) for a filtered,
+    sorted, paginated quiver listing.
 
+    scope:
+      "distinct"  — one row per unlabeled quiver (exchange_matrix = canonical).
+      "labelings" — one row per labeled matrix in the quiver's class (same
+                    qmd_id repeats; exchange_matrix is each labeling).
+
+    Both totals are always returned so the UI can show either count (and the
+    download dialog can update without a second request).
+    """
+    query = _filtered_quivers(db, **filters)
     col = _SORT_COLUMNS.get(sort, models.Quiver.n_vertices)
     col = col.desc() if direction == "desc" else col.asc()
-    rows = (query.order_by(col, models.Quiver.quiver_id)
-                 .offset(offset).limit(limit).all())
+    rows = query.order_by(col, models.Quiver.quiver_id).all()
 
-    items = [_quiver_list_item(q, mc) for q, mc in rows]
-    return items, total
+    distinct_total = len(rows)
+    labeled_total = sum(_labeling_count(q, mc) for q, mc in rows)
+
+    if scope == "labelings":
+        expanded: list[dict] = []
+        for q, mc in rows:
+            base = _quiver_list_item(q, mc)
+            labs = ([e for e in (mc.labeled_quivers or [])
+                     if e.get("qmd_id") == q.quiver_id] if mc else [])
+            if labs:
+                for e in labs:
+                    item = dict(base)
+                    item["exchange_matrix"] = e["matrix"]
+                    expanded.append(item)
+            else:
+                expanded.append(base)
+        items = expanded[offset:offset + limit]
+        total = labeled_total
+    else:
+        items = [_quiver_list_item(q, mc) for q, mc in rows[offset:offset + limit]]
+        total = distinct_total
+
+    return items, total, distinct_total, labeled_total
 
 
 def get_quiver_detail(db: Session, qid: str) -> Optional[dict]:

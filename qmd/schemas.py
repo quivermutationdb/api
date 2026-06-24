@@ -34,6 +34,7 @@ class QuiverListItem(BaseModel):
     is_bipartite: Optional[bool] = None
     is_open: bool
     class_size: Optional[int] = None       # None => unbounded (rendered as ∞)
+    exchange_matrix: Optional[Matrix] = None
     mc_id: Optional[str] = None
 
 
@@ -109,3 +110,5 @@ class ClassDetail(BaseModel):
 class QuiverListResponse(BaseModel):
     items: list[QuiverListItem]
     total: int
+    distinct_total: Optional[int] = None
+    labeled_total: Optional[int] = None

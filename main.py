@@ -65,18 +65,25 @@ def health():
 def list_quivers(
     rank: Optional[int] = None,
     is_open: Optional[bool] = None,
+    is_connected: Optional[bool] = None,
     dynkin_type: Optional[str] = None,
+    scope: str = "distinct",
     sort: str = "num_vertices",
     dir: str = "asc",
     offset: int = 0,
     limit: int = 50,
     db: Session = Depends(get_db),
 ):
-    filters = {"rank": rank, "is_open": is_open, "dynkin_type": dynkin_type}
-    items, total = crud.list_quivers(
-        db, filters=filters, sort=sort, direction=dir, offset=offset, limit=limit
+    if scope not in ("distinct", "labelings"):
+        raise HTTPException(status_code=400, detail="scope must be 'distinct' or 'labelings'")
+    filters = {"rank": rank, "is_open": is_open,
+               "is_connected": is_connected, "dynkin_type": dynkin_type}
+    items, total, distinct_total, labeled_total = crud.list_quivers(
+        db, filters=filters, scope=scope, sort=sort, direction=dir,
+        offset=offset, limit=limit,
     )
-    return {"items": items, "total": total}
+    return {"items": items, "total": total,
+            "distinct_total": distinct_total, "labeled_total": labeled_total}
 
 
 @app.get("/quivers/{quiver_id}", response_model=schemas.QuiverDetail)
@@ -121,8 +128,11 @@ def search(
         "is_simply_laced": is_simply_laced,
         "is_mutation_finite": is_mutation_finite,
     }
-    items, total = crud.list_quivers(db, filters=filters, offset=offset, limit=limit)
-    return {"items": items, "total": total}
+    items, total, distinct_total, labeled_total = crud.list_quivers(
+        db, filters=filters, offset=offset, limit=limit
+    )
+    return {"items": items, "total": total,
+            "distinct_total": distinct_total, "labeled_total": labeled_total}
 
 
 # ---------------------------------------------------------------------------
