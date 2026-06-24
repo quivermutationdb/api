@@ -284,6 +284,9 @@ def get_class_detail(db: Session, mc_id: str) -> Optional[dict]:
 
 # Column order for dataset exports (CSV / Excel).  Quiver-level columns first,
 # then the full mutation-class statistics.  Stable so downloads are diffable.
+# Adding a column for a new invariant? Also set it in _export_row, surface it in
+# the schemas, and document it in the wiki (website/wiki.html) — full checklist
+# in qmd/models.py.
 EXPORT_COLUMNS = [
     # --- quiver (per unlabeled quiver / per labeling) ---
     "qmd_id", "num_vertices", "exchange_matrix", "representation_type",

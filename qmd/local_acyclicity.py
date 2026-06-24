@@ -162,6 +162,8 @@ def _status(q, kind: str, max_depth: int, timeout: float, cap: int):
 
 
 # --- public API ------------------------------------------------------------
+# Adding a new local-acyclicity condition? Also document it in the wiki
+# (website/wiki.html) — see the "Adding a new invariant" checklist in qmd/models.py.
 
 def banff_status(q, max_depth=64, timeout=60, cap=32):
     return _status(q, "banff", max_depth, timeout, cap)

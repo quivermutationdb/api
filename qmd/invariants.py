@@ -216,7 +216,11 @@ def symmetry_group(m: Matrix) -> dict:
 # ---------------------------------------------------------------------------
 
 def quiver_invariants(m: Matrix) -> dict:
-    """All exact per-quiver invariants for one (canonical) quiver."""
+    """All exact per-quiver invariants for one (canonical) quiver.
+
+    Adding one here? Also document it in the wiki (website/wiki.html) — see the
+    "Adding a new invariant" checklist in qmd/models.py.
+    """
     return {
         "is_bipartite": is_bipartite(m),
         "is_abundant": is_abundant(m),

@@ -7,6 +7,9 @@ Field names match the *frontend's* expected contract (qmd_id, num_vertices,
 exchange_matrix, class_size, ...), which deliberately differs from the
 internal ORM column names (quiver_id, n_vertices, canonical_matrix, ...).
 The CRUD layer is responsible for translating ORM rows into these shapes.
+
+Adding a field for a new invariant? Also document it in the wiki
+(website/wiki.html) — see the "Adding a new invariant" checklist in qmd/models.py.
 """
 
 from __future__ import annotations

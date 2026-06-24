@@ -11,6 +11,23 @@ mutation_classes
 quivers
     One row per unlabeled quiver isomorphism class (Q.* id).
     Each quiver belongs to exactly one mutation class.
+
+Adding a new invariant / property?  Keep these in sync (the wiki is the one
+that's easy to forget):
+
+    1. This file        — add the Column (+ an Alembic migration).
+    2. qmd/invariants.py or qmd/local_acyclicity.py — compute it.
+    3. qmd/crud.py       — write it in upsert_generation_result; surface it in
+                           get_quiver_detail / get_class_detail / _quiver_list_item /
+                           _export_row; and add it to EXPORT_COLUMNS.
+    4. qmd/schemas.py    — add the field to the matching response schema.
+    5. website repo      — show it on the quiver / class page, and (optionally)
+                           as a Browse / Search column.
+    6. website/wiki.html — add a <section id="..."> defining it (with a code
+                           snippet if it's computed), and point the new property
+                           label / column header at /wiki.html#that-id.  The wiki
+                           lives in the separate `website` repo; its section ids
+                           are the deep-link anchors every page links to.
 """
 
 from sqlalchemy import (
@@ -49,7 +66,9 @@ class MutationClass(Base):
     is_infinite_expected = Column(Boolean, nullable=True)
     size_of_explored_frontier = Column(Integer, nullable=True)
 
-    # Three-state (true / false / null = unknown) class properties
+    # Three-state (true / false / null = unknown) class properties.
+    # New property here? Follow the "Adding a new invariant" checklist in the
+    # module docstring — and remember the wiki (website/wiki.html).
     is_mutation_acyclic  = Column(Boolean, nullable=True)
     is_banff             = Column(Boolean, nullable=True)
     is_louise            = Column(Boolean, nullable=True)
@@ -68,7 +87,9 @@ class Quiver(Base):
     quiver_id        = Column(String, primary_key=True)
     n_vertices       = Column(Integer, nullable=False)
     canonical_matrix = Column(JSONB, nullable=False)
-    # Computed invariants (stored so the API can filter on them)
+    # Computed invariants (stored so the API can filter on them).
+    # New invariant here? Follow the "Adding a new invariant" checklist in the
+    # module docstring — and remember the wiki (website/wiki.html).
     max_edge         = Column(Integer, nullable=False, default=0)
     is_acyclic       = Column(Boolean, nullable=False, default=True)
     is_connected     = Column(Boolean, nullable=False, default=True)
