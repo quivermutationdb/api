@@ -274,7 +274,6 @@ def get_class_detail(db: Session, mc_id: str) -> Optional[dict]:
         "is_banff": mc.is_banff,
         "is_louise": mc.is_louise,
         "is_p_prime": mc.is_p_prime,
-        "is_locally_acyclic": mc.is_locally_acyclic,
         "provenance": mc.provenance,
     }
 
@@ -294,7 +293,7 @@ EXPORT_COLUMNS = [
     "mc_id", "dynkin_type", "is_open", "class_size", "labeled_size",
     "distinct_quiver_count", "merged_orbit_count",
     "is_finite_confirmed", "is_infinite_confirmed", "is_infinite_expected",
-    "size_of_explored_frontier", "is_mutation_acyclic", "is_locally_acyclic",
+    "size_of_explored_frontier", "is_mutation_acyclic",
     "is_banff", "is_louise", "is_p_prime",
 ]
 
@@ -332,7 +331,6 @@ def _export_row(q: models.Quiver, mc: Optional[models.MutationClass]) -> dict:
         "is_infinite_expected": mc.is_infinite_expected if mc else None,
         "size_of_explored_frontier": mc.size_of_explored_frontier if mc else None,
         "is_mutation_acyclic": mc.is_mutation_acyclic if mc else None,
-        "is_locally_acyclic": mc.is_locally_acyclic if mc else None,
         "is_banff": mc.is_banff if mc else None,
         "is_louise": mc.is_louise if mc else None,
         "is_p_prime": mc.is_p_prime if mc else None,
@@ -533,7 +531,6 @@ def upsert_generation_result(db: Session, result: GenerationResult) -> None:
             is_banff              = _TRI[b_state],
             is_louise             = _TRI[l_state],
             is_p_prime            = _TRI[p_state],
-            is_locally_acyclic    = True if b_state == "true" else None,
             provenance            = provenance,
         ))
 

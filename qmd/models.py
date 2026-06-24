@@ -54,7 +54,6 @@ class MutationClass(Base):
     is_banff             = Column(Boolean, nullable=True)
     is_louise            = Column(Boolean, nullable=True)
     is_p_prime           = Column(Boolean, nullable=True)
-    is_locally_acyclic   = Column(Boolean, nullable=True)
 
     # Per-property method / witness for the semidecidable properties
     provenance           = Column(JSONB, nullable=True)

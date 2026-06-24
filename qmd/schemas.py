@@ -99,7 +99,6 @@ class ClassDetail(BaseModel):
     is_banff: Optional[bool] = None
     is_louise: Optional[bool] = None
     is_p_prime: Optional[bool] = None
-    is_locally_acyclic: Optional[bool] = None
     provenance: Optional[dict] = None
 
 

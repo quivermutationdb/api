@@ -173,11 +173,3 @@ def louise_status(q, max_depth=64, timeout=60, cap=32):
 
 def p_prime_status(q, max_depth=64, timeout=60, cap=32):
     return _status(q, "p_prime", max_depth, timeout, cap)
-
-
-def locally_acyclic_status(q, **kw):
-    """Banff is a sufficient condition for local acyclicity (Muller)."""
-    state, witness = banff_status(q, **kw)
-    if state == "true":
-        return ("true", witness)
-    return ("unknown", None)
