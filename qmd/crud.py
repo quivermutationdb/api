@@ -16,6 +16,8 @@ from qmd import dynkin, invariants, models
 from qmd import local_acyclicity as la
 from qmd.core import (
     GenerationResult,
+    canonical_form,
+    to_matrix,
     to_lists,
     quiver_id,
     max_edge,
@@ -41,6 +43,39 @@ def _class_size(mc: Optional[models.MutationClass]) -> Optional[int]:
     if mc is None or mc.is_open:
         return None
     return mc.labeled_size
+
+
+def _distinct_quivers(labeled_quivers: list, canonical_qid: Optional[str]) -> list[dict]:
+    """
+    Collapse the full labeled orbit into one entry per distinct unlabeled
+    quiver (Q.* id).
+
+    The labeled orbit stores every vertex-labeling of every quiver in the
+    class, so the same Q.* id appears many times.  Here we group by qmd_id,
+    count the labelings, and expose each quiver's canonical form (so the
+    figure matches its quiver page).  Exactly one entry — the class canonical
+    representative — is flagged is_canonical.
+    """
+    groups: dict[str, dict] = {}
+    order: list[str] = []
+    for entry in labeled_quivers:
+        qid = entry["qmd_id"]
+        g = groups.get(qid)
+        if g is None:
+            groups[qid] = {
+                "qmd_id": qid,
+                "matrix": to_lists(canonical_form(to_matrix(entry["matrix"]))),
+                "labeling_count": 1,
+                "is_canonical": qid == canonical_qid,
+            }
+            order.append(qid)
+        else:
+            g["labeling_count"] += 1
+
+    items = [groups[qid] for qid in order]
+    # Canonical first, then most-labeled, then id for a stable order.
+    items.sort(key=lambda d: (not d["is_canonical"], -d["labeling_count"], d["qmd_id"]))
+    return items
 
 
 def _quiver_list_item(q: models.Quiver, mc: Optional[models.MutationClass]) -> dict:
@@ -180,6 +215,7 @@ def get_class_detail(db: Session, mc_id: str) -> Optional[dict]:
         "merged_orbit_count": mc.merged_orbit_count,
         "canonical_matrix": mc.canonical_rep,
         "canonical_qid": mc.canonical_qid,
+        "distinct_quivers": _distinct_quivers(mc.labeled_quivers, mc.canonical_qid),
         "labeled_quivers": mc.labeled_quivers,   # [{qmd_id, matrix}, ...]
         "is_finite_confirmed": mc.is_finite_confirmed,
         "is_infinite_confirmed": mc.is_infinite_confirmed,

@@ -63,6 +63,14 @@ class LabeledMember(BaseModel):
     matrix: Matrix
 
 
+class DistinctQuiver(BaseModel):
+    """One distinct unlabeled quiver in the class (collapses all its labelings)."""
+    qmd_id: str
+    matrix: Matrix              # the quiver's canonical form (matches the quiver page)
+    labeling_count: int         # how many labeled orbit matrices map to this quiver
+    is_canonical: bool = False  # true for exactly one: the class canonical representative
+
+
 class ClassDetail(BaseModel):
     """The full mutation-class page."""
     mc_id: str
@@ -75,6 +83,7 @@ class ClassDetail(BaseModel):
     merged_orbit_count: int
     canonical_matrix: Matrix
     canonical_qid: Optional[str] = None
+    distinct_quivers: list[DistinctQuiver] = []
     labeled_quivers: list[LabeledMember] = []
     is_finite_confirmed: Optional[bool] = None
     is_infinite_confirmed: Optional[bool] = None
