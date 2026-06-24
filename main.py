@@ -147,6 +147,7 @@ def _client_ip(request: Request) -> Optional[str]:
 def export(
     request: Request,
     format: str = "csv",
+    scope: str = "distinct",
     email: Optional[str] = None,
     name: Optional[str] = None,
     rank: Optional[int] = None,
@@ -171,6 +172,9 @@ def export(
     fmt = format.lower()
     if fmt not in _EXPORT_MEDIA:
         raise HTTPException(status_code=400, detail="format must be 'csv' or 'xlsx'")
+    scope = scope.lower()
+    if scope not in ("distinct", "labelings"):
+        raise HTTPException(status_code=400, detail="scope must be 'distinct' or 'labelings'")
 
     filters = {
         "rank": rank,
@@ -185,7 +189,7 @@ def export(
         "is_simply_laced": is_simply_laced,
         "is_mutation_finite": is_mutation_finite,
     }
-    rows = crud.export_rows(db, filters=filters)
+    rows = crud.export_rows(db, filters=filters, scope=scope)
 
     if fmt == "csv":
         body = exporters.to_csv_bytes(rows, crud.EXPORT_COLUMNS)
@@ -194,11 +198,13 @@ def export(
 
     # Best-effort logging: a tracking failure must never break the download.
     try:
+        logged = {k: v for k, v in filters.items() if v is not None}
+        logged["scope"] = scope
         crud.log_download(
             db,
             fmt=fmt,
             row_count=len(rows),
-            filters={k: v for k, v in filters.items() if v is not None},
+            filters=logged,
             email=email,
             name=name,
             ip=_client_ip(request),
@@ -209,7 +215,8 @@ def export(
         db.rollback()
 
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-    filename = f"qmd-quivers-{stamp}.{fmt}"
+    base = "qmd-labelings" if scope == "labelings" else "qmd-quivers"
+    filename = f"{base}-{stamp}.{fmt}"
     return Response(
         content=body,
         media_type=_EXPORT_MEDIA[fmt],

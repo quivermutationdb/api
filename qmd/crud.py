@@ -85,6 +85,10 @@ def _quiver_list_item(q: models.Quiver, mc: Optional[models.MutationClass]) -> d
         "num_vertices": q.n_vertices,
         "dynkin_type": mc.dynkin_type if mc else None,
         "representation_type": q.representation_type,
+        "max_edge": q.max_edge,
+        "is_acyclic": q.is_acyclic,
+        "is_connected": q.is_connected,
+        "is_bipartite": q.is_bipartite,
         "is_open": mc.is_open if mc else False,
         "class_size": _class_size(mc),
         "mc_id": q.mc_id,
@@ -236,20 +240,67 @@ def get_class_detail(db: Session, mc_id: str) -> Optional[dict]:
 # Export
 # ---------------------------------------------------------------------------
 
-# Column order for dataset exports (CSV / Excel).  One row per unlabeled quiver,
-# enriched with its mutation-class context.  Stable so downloads are diffable.
+# Column order for dataset exports (CSV / Excel).  Quiver-level columns first,
+# then the full mutation-class statistics.  Stable so downloads are diffable.
 EXPORT_COLUMNS = [
-    "qmd_id", "num_vertices", "exchange_matrix", "dynkin_type",
-    "representation_type", "is_open", "class_size", "max_edge",
-    "is_acyclic", "is_connected", "is_bipartite", "is_abundant", "is_planar",
-    "symmetry_order", "symmetry_name", "mc_id",
+    # --- quiver (per unlabeled quiver / per labeling) ---
+    "qmd_id", "num_vertices", "exchange_matrix", "representation_type",
+    "max_edge", "is_acyclic", "is_connected", "is_bipartite", "is_abundant",
+    "is_planar", "symmetry_order", "symmetry_name",
+    # --- mutation-class statistics ---
+    "mc_id", "dynkin_type", "is_open", "class_size", "labeled_size",
+    "distinct_quiver_count", "merged_orbit_count",
+    "is_finite_confirmed", "is_infinite_confirmed", "is_infinite_expected",
+    "size_of_explored_frontier", "is_mutation_acyclic", "is_locally_acyclic",
+    "is_banff", "is_louise", "is_p_prime",
 ]
+
+
+def _export_row(q: models.Quiver, mc: Optional[models.MutationClass]) -> dict:
+    """Flat export dict for one quiver + its mutation-class statistics.
+
+    exchange_matrix defaults to the quiver's canonical form; callers exporting
+    individual labelings override it per labeling.
+    """
+    sym = q.symmetry_group or {}
+    return {
+        "qmd_id": q.quiver_id,
+        "num_vertices": q.n_vertices,
+        "exchange_matrix": json.dumps(q.canonical_matrix, separators=(",", ":")),
+        "representation_type": q.representation_type,
+        "max_edge": q.max_edge,
+        "is_acyclic": q.is_acyclic,
+        "is_connected": q.is_connected,
+        "is_bipartite": q.is_bipartite,
+        "is_abundant": q.is_abundant,
+        "is_planar": q.is_planar,
+        "symmetry_order": sym.get("order"),
+        "symmetry_name": sym.get("name"),
+        # --- mutation-class statistics ---
+        "mc_id": q.mc_id,
+        "dynkin_type": mc.dynkin_type if mc else None,
+        "is_open": mc.is_open if mc else False,
+        "class_size": _class_size(mc),
+        "labeled_size": mc.labeled_size if mc else None,
+        "distinct_quiver_count": mc.distinct_quiver_count if mc else None,
+        "merged_orbit_count": mc.merged_orbit_count if mc else None,
+        "is_finite_confirmed": mc.is_finite_confirmed if mc else None,
+        "is_infinite_confirmed": mc.is_infinite_confirmed if mc else None,
+        "is_infinite_expected": mc.is_infinite_expected if mc else None,
+        "size_of_explored_frontier": mc.size_of_explored_frontier if mc else None,
+        "is_mutation_acyclic": mc.is_mutation_acyclic if mc else None,
+        "is_locally_acyclic": mc.is_locally_acyclic if mc else None,
+        "is_banff": mc.is_banff if mc else None,
+        "is_louise": mc.is_louise if mc else None,
+        "is_p_prime": mc.is_p_prime if mc else None,
+    }
 
 
 def export_rows(
     db: Session,
     *,
     filters: dict,
+    scope: str = "distinct",
     sort: str = "num_vertices",
     direction: str = "asc",
 ) -> list[dict]:
@@ -257,6 +308,11 @@ def export_rows(
     Materialise every quiver matching `filters` (no pagination) as flat,
     export-ready dicts keyed by EXPORT_COLUMNS.  The exchange matrix is
     serialised as compact JSON so it fits one cell.
+
+    scope:
+      "distinct"  — one row per unlabeled quiver (exchange_matrix = canonical).
+      "labelings" — one row per labeled matrix in the quiver's mutation class
+                    (the same qmd_id repeats, exchange_matrix is each labeling).
     """
     query = _filtered_quivers(db, **filters)
     col = _SORT_COLUMNS.get(sort, models.Quiver.n_vertices)
@@ -265,25 +321,17 @@ def export_rows(
 
     out: list[dict] = []
     for q, mc in rows:
-        sym = q.symmetry_group or {}
-        out.append({
-            "qmd_id": q.quiver_id,
-            "num_vertices": q.n_vertices,
-            "exchange_matrix": json.dumps(q.canonical_matrix, separators=(",", ":")),
-            "dynkin_type": mc.dynkin_type if mc else None,
-            "representation_type": q.representation_type,
-            "is_open": mc.is_open if mc else False,
-            "class_size": _class_size(mc),
-            "max_edge": q.max_edge,
-            "is_acyclic": q.is_acyclic,
-            "is_connected": q.is_connected,
-            "is_bipartite": q.is_bipartite,
-            "is_abundant": q.is_abundant,
-            "is_planar": q.is_planar,
-            "symmetry_order": sym.get("order"),
-            "symmetry_name": sym.get("name"),
-            "mc_id": q.mc_id,
-        })
+        base = _export_row(q, mc)
+        if scope == "labelings" and mc is not None:
+            labelings = [e for e in (mc.labeled_quivers or [])
+                         if e.get("qmd_id") == q.quiver_id]
+            if labelings:
+                for e in labelings:
+                    row = dict(base)
+                    row["exchange_matrix"] = json.dumps(e["matrix"], separators=(",", ":"))
+                    out.append(row)
+                continue
+        out.append(base)
     return out
 
 

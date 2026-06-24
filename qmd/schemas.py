@@ -28,6 +28,10 @@ class QuiverListItem(BaseModel):
     num_vertices: int
     dynkin_type: Optional[str] = None
     representation_type: Optional[str] = None
+    max_edge: Optional[int] = None
+    is_acyclic: Optional[bool] = None
+    is_connected: Optional[bool] = None
+    is_bipartite: Optional[bool] = None
     is_open: bool
     class_size: Optional[int] = None       # None => unbounded (rendered as ∞)
     mc_id: Optional[str] = None
