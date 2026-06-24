@@ -13,7 +13,9 @@ quivers
     Each quiver belongs to exactly one mutation class.
 """
 
-from sqlalchemy import Boolean, Column, ForeignKey, Integer, String
+from sqlalchemy import (
+    Boolean, Column, DateTime, ForeignKey, Integer, String, func,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, relationship
 
@@ -81,3 +83,24 @@ class Quiver(Base):
                               nullable=True, index=True)
 
     mutation_class = relationship("MutationClass", back_populates="quivers")
+
+
+class Download(Base):
+    """
+    One row per dataset export.  Records what cut was downloaded, in what
+    format, how many rows, and (optionally) who — so usage can be tracked
+    without requiring site accounts.
+    """
+    __tablename__ = "downloads"
+
+    id          = Column(Integer, primary_key=True, autoincrement=True)
+    created_at  = Column(DateTime(timezone=True), server_default=func.now(),
+                         nullable=False, index=True)
+    fmt         = Column(String, nullable=False)            # 'csv' | 'xlsx'
+    row_count   = Column(Integer, nullable=False)
+    filters     = Column(JSONB, nullable=True)              # the applied cut (non-null filters)
+    email       = Column(String, nullable=True, index=True) # optional, self-reported
+    name        = Column(String, nullable=True)             # optional name / affiliation
+    ip          = Column(String, nullable=True)
+    user_agent  = Column(String, nullable=True)
+    referer     = Column(String, nullable=True)

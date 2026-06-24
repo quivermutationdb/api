@@ -8,6 +8,7 @@ Reads translate internal ORM rows into the frontend-facing shapes
 and persist the per-quiver invariants and the per-class labeled orbit.
 """
 
+import json
 from typing import Optional
 
 from sqlalchemy.orm import Session
@@ -229,6 +230,87 @@ def get_class_detail(db: Session, mc_id: str) -> Optional[dict]:
         "is_locally_acyclic": mc.is_locally_acyclic,
         "provenance": mc.provenance,
     }
+
+
+# ---------------------------------------------------------------------------
+# Export
+# ---------------------------------------------------------------------------
+
+# Column order for dataset exports (CSV / Excel).  One row per unlabeled quiver,
+# enriched with its mutation-class context.  Stable so downloads are diffable.
+EXPORT_COLUMNS = [
+    "qmd_id", "num_vertices", "exchange_matrix", "dynkin_type",
+    "representation_type", "is_open", "class_size", "max_edge",
+    "is_acyclic", "is_connected", "is_bipartite", "is_abundant", "is_planar",
+    "symmetry_order", "symmetry_name", "mc_id",
+]
+
+
+def export_rows(
+    db: Session,
+    *,
+    filters: dict,
+    sort: str = "num_vertices",
+    direction: str = "asc",
+) -> list[dict]:
+    """
+    Materialise every quiver matching `filters` (no pagination) as flat,
+    export-ready dicts keyed by EXPORT_COLUMNS.  The exchange matrix is
+    serialised as compact JSON so it fits one cell.
+    """
+    query = _filtered_quivers(db, **filters)
+    col = _SORT_COLUMNS.get(sort, models.Quiver.n_vertices)
+    col = col.desc() if direction == "desc" else col.asc()
+    rows = query.order_by(col, models.Quiver.quiver_id).all()
+
+    out: list[dict] = []
+    for q, mc in rows:
+        sym = q.symmetry_group or {}
+        out.append({
+            "qmd_id": q.quiver_id,
+            "num_vertices": q.n_vertices,
+            "exchange_matrix": json.dumps(q.canonical_matrix, separators=(",", ":")),
+            "dynkin_type": mc.dynkin_type if mc else None,
+            "representation_type": q.representation_type,
+            "is_open": mc.is_open if mc else False,
+            "class_size": _class_size(mc),
+            "max_edge": q.max_edge,
+            "is_acyclic": q.is_acyclic,
+            "is_connected": q.is_connected,
+            "is_bipartite": q.is_bipartite,
+            "is_abundant": q.is_abundant,
+            "is_planar": q.is_planar,
+            "symmetry_order": sym.get("order"),
+            "symmetry_name": sym.get("name"),
+            "mc_id": q.mc_id,
+        })
+    return out
+
+
+def log_download(
+    db: Session,
+    *,
+    fmt: str,
+    row_count: int,
+    filters: dict,
+    email: Optional[str] = None,
+    name: Optional[str] = None,
+    ip: Optional[str] = None,
+    user_agent: Optional[str] = None,
+    referer: Optional[str] = None,
+) -> None:
+    """Record one dataset export.  Best-effort: never block a download on a log failure."""
+    db.add(models.Download(
+        fmt=fmt,
+        row_count=row_count,
+        filters=filters or None,
+        email=email or None,
+        name=name or None,
+        ip=ip,
+        user_agent=user_agent,
+        referer=referer,
+    ))
+    db.commit()
 
 
 # ---------------------------------------------------------------------------
