@@ -493,6 +493,33 @@ except AssertionError:
 check('open+open does not raise', not raised_oo)
 
 # ---------------------------------------------------------------------------
+# Mutation-acyclic subquiver fallback (Markov heredity)
+# ---------------------------------------------------------------------------
+from qmd.crud import _resolve_mutation_acyclic
+from qmd.invariants import class_is_mutation_acyclic as _cima
+
+_ma_infos = [
+    (mc_id, len(mc.canonical_rep), _cima(mc.labeled_quivers, mc.is_open),
+     mc.labeled_quivers, mc.quiver_ids)
+    for mc_id, mc in r4.classes.items()
+]
+_resolved = _resolve_mutation_acyclic(_ma_infos)
+_base = {mc_id: b for mc_id, _n, b, _m, _q in _ma_infos}
+
+# Markov (rank 3, closed, no acyclic member) is the not-mutation-acyclic base case
+_markov_mc = r4.membership[quiver_id(to_matrix([[0, 2, -2], [-2, 0, 2], [2, -2, 0]]))]
+check('Markov class is mutation-acyclic = False', _resolved[_markov_mc] is False)
+
+# the pass only ever upgrades unknown -> False; it never overwrites a proved value
+check('resolution only upgrades unknown -> False', all(
+    _resolved[k] == _base[k] or (_base[k] is None and _resolved[k] is False)
+    for k in _resolved))
+
+# at least one open class is upgraded to False by a Markov induced subquiver
+check('subquiver fallback upgrades >=1 open class',
+      any(_base[k] is None and _resolved[k] is False for k in _resolved))
+
+# ---------------------------------------------------------------------------
 print(f'\n{"="*62}')
 print(f'Results: {passed} passed, {failed} failed')
 if _failures:

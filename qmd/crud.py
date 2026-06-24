@@ -405,6 +405,68 @@ def log_download(
 
 
 # ---------------------------------------------------------------------------
+# Mutation-acyclicity resolution (subquiver fallback)
+# ---------------------------------------------------------------------------
+#
+# A BFS over a bounded mutation class can prove is_mutation_acyclic = True (it
+# found an acyclic member) and, for a closed class, prove False (the whole class
+# was explored, none acyclic).  For an *open* class with no acyclic member found
+# it can only say "unknown".
+#
+# The subquiver fallback upgrades such an "unknown" to a definite False:
+# mutation-acyclicity is hereditary under induced subquivers, so if any member
+# of the class has a proper induced subquiver that is already known NOT to be
+# mutation-acyclic, the whole class is not mutation-acyclic.  The base case is
+# the Markov quiver (rank 3, its own closed class -> proved False), and
+# rank-ordered resolution lets that propagate upward.
+
+def _delete_vertex(m, k):
+    """Induced subquiver obtained by deleting vertex k (rows/cols)."""
+    idx = [i for i in range(len(m)) if i != k]
+    return tuple(tuple(m[a][b] for b in idx) for a in idx)
+
+
+def _has_known_non_ma_subquiver(matrices, mut_by_qid: dict) -> bool:
+    """
+    True if some member has an induced subquiver already known to be NOT
+    mutation-acyclic.  By heredity a not-mutation-acyclic subquiver of any size
+    forces a not-mutation-acyclic (n-1)-subquiver, so deleting a single vertex
+    is enough to find a witness.
+    """
+    for m in matrices:
+        n = len(m)
+        if n < 4:          # the smallest non-mutation-acyclic quiver is rank 3 (Markov)
+            continue
+        for k in range(n):
+            if mut_by_qid.get(quiver_id(_delete_vertex(m, k))) is False:
+                return True
+    return False
+
+
+def _resolve_mutation_acyclic(class_infos) -> dict:
+    """
+    Resolve is_mutation_acyclic for every class in ascending rank order.
+
+    class_infos: iterable of (mc_id, n_vertices, base_state, matrices, qids),
+    where base_state is the BFS result (True / False / None) and matrices /
+    qids are the class's explored members and their unlabeled quiver ids.
+
+    Returns {mc_id: True | False | None}.  Only "unknown" (None) values can be
+    upgraded — to False — and never the reverse, so the pass is sound.
+    """
+    final: dict = {}
+    mut_by_qid: dict = {}
+    for mc_id, _n, base, matrices, qids in sorted(class_infos, key=lambda c: c[1]):
+        state = base
+        if state is None and _has_known_non_ma_subquiver(matrices, mut_by_qid):
+            state = False
+        final[mc_id] = state
+        for qid in qids:
+            mut_by_qid[qid] = state
+    return final
+
+
+# ---------------------------------------------------------------------------
 # Write
 # ---------------------------------------------------------------------------
 
@@ -417,6 +479,15 @@ def upsert_generation_result(db: Session, result: GenerationResult) -> None:
     Finite (closed) classes are labeled with their Dynkin type via qmd.dynkin;
     open/affine classes are left null.
     """
+    # Resolve mutation-acyclicity for every class up front (rank-ordered, so the
+    # subquiver fallback can use already-resolved lower-rank classes).
+    mut_acyclic = _resolve_mutation_acyclic([
+        (mc_id, len(mc_res.canonical_rep),
+         invariants.class_is_mutation_acyclic(mc_res.labeled_quivers, mc_res.is_open),
+         mc_res.labeled_quivers, mc_res.quiver_ids)
+        for mc_id, mc_res in result.classes.items()
+    ])
+
     # Mutation classes first (quivers FK -> mutation_classes).
     for mc_id, mc_res in result.classes.items():
         labeled = [
@@ -458,8 +529,7 @@ def upsert_generation_result(db: Session, result: GenerationResult) -> None:
             is_infinite_confirmed = is_open,
             is_infinite_expected  = False,
             size_of_explored_frontier = len(mc_res.boundary_quivers),
-            is_mutation_acyclic   = invariants.class_is_mutation_acyclic(
-                                        mc_res.labeled_quivers, is_open),
+            is_mutation_acyclic   = mut_acyclic[mc_id],
             is_banff              = _TRI[b_state],
             is_louise             = _TRI[l_state],
             is_p_prime            = _TRI[p_state],
