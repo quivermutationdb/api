@@ -76,6 +76,9 @@ class Quiver(Base):
     is_bipartite     = Column(Boolean, nullable=True)
     is_abundant      = Column(Boolean, nullable=True)
     is_planar        = Column(Boolean, nullable=True)        # null = unknown (n > 4)
+    # Number of labeled matrices in the class that map to this unlabeled quiver.
+    # Stored so labeled_total is a cheap SUM instead of expanding labeled orbits.
+    labeling_count   = Column(Integer, nullable=True)
     representation_type = Column(String, nullable=True)      # 'finite'/'tame'/'wild'; null = n/a (cyclic)
     symmetry_group   = Column(JSONB, nullable=True)          # {order, name, generators}
     mc_id            = Column(String,

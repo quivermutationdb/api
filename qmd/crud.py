@@ -11,7 +11,8 @@ and persist the per-quiver invariants and the per-class labeled orbit.
 import json
 from typing import Optional
 
-from sqlalchemy.orm import Session
+from sqlalchemy import func
+from sqlalchemy.orm import Session, defer
 
 from qmd import dynkin, invariants, models
 from qmd import local_acyclicity as la
@@ -94,14 +95,6 @@ def _quiver_list_item(q: models.Quiver, mc: Optional[models.MutationClass]) -> d
         "exchange_matrix": q.canonical_matrix,   # labeled rows override this per labeling
         "mc_id": q.mc_id,
     }
-
-
-def _labeling_count(q: models.Quiver, mc: Optional[models.MutationClass]) -> int:
-    """How many labeled matrices in the class map to this unlabeled quiver."""
-    if mc is None or not mc.labeled_quivers:
-        return 1
-    c = sum(1 for e in mc.labeled_quivers if e.get("qmd_id") == q.quiver_id)
-    return c if c else 1
 
 
 # ---------------------------------------------------------------------------
@@ -191,12 +184,16 @@ def list_quivers(
     query = _filtered_quivers(db, **filters)
     col = _SORT_COLUMNS.get(sort, models.Quiver.n_vertices)
     col = col.desc() if direction == "desc" else col.asc()
-    rows = query.order_by(col, models.Quiver.quiver_id).all()
 
-    distinct_total = len(rows)
-    labeled_total = sum(_labeling_count(q, mc) for q, mc in rows)
+    distinct_total = query.count()
+    labeled_total = query.with_entities(
+        func.coalesce(func.sum(models.Quiver.labeling_count), 0)
+    ).scalar() or 0
 
     if scope == "labelings":
+        # Needs the labeled orbits to recover each labeling's matrix, so this
+        # path loads matching rows; the common distinct path below does not.
+        rows = query.order_by(col, models.Quiver.quiver_id).all()
         expanded: list[dict] = []
         for q, mc in rows:
             base = _quiver_list_item(q, mc)
@@ -212,7 +209,14 @@ def list_quivers(
         items = expanded[offset:offset + limit]
         total = labeled_total
     else:
-        items = [_quiver_list_item(q, mc) for q, mc in rows[offset:offset + limit]]
+        # Heavy per-class JSON isn't needed for distinct rows — defer it so a
+        # page only loads the columns it renders.
+        rows = (query
+                .options(defer(models.MutationClass.labeled_quivers),
+                         defer(models.MutationClass.boundary_quivers))
+                .order_by(col, models.Quiver.quiver_id)
+                .offset(offset).limit(limit).all())
+        items = [_quiver_list_item(q, mc) for q, mc in rows]
         total = distinct_total
 
     return items, total, distinct_total, labeled_total
@@ -463,6 +467,13 @@ def upsert_generation_result(db: Session, result: GenerationResult) -> None:
             provenance            = provenance,
         ))
 
+    # Per-quiver labeling counts: how many labeled matrices across all classes
+    # map to each unlabeled quiver (quiver_ids is parallel to labeled_quivers).
+    labeling_counts: dict[str, int] = {}
+    for mc_res in result.classes.values():
+        for qid in mc_res.quiver_ids:
+            labeling_counts[qid] = labeling_counts.get(qid, 0) + 1
+
     # Quivers.
     for qid, matrix in result.quivers.items():
         qi = invariants.quiver_invariants(matrix)
@@ -476,6 +487,7 @@ def upsert_generation_result(db: Session, result: GenerationResult) -> None:
             is_bipartite     = qi["is_bipartite"],
             is_abundant      = qi["is_abundant"],
             is_planar        = qi["is_planar"],
+            labeling_count   = labeling_counts.get(qid, 1),
             representation_type = qi["representation_type"],
             symmetry_group   = qi["symmetry_group"],
             mc_id            = result.membership.get(qid),
