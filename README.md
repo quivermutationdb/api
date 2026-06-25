@@ -70,7 +70,7 @@ python -m pytest tests/ -v
 
 ## Contact
 
-Maintained by Blake Jackson — <blakej@andrew.cmu.edu>
+Maintained by Blake Jackson — <jackson@icarm.io>
 
 ## License
 
