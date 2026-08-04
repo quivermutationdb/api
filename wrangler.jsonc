@@ -23,10 +23,7 @@
     {
       "binding": "DB",
       "database_name": "qmd",
-      // TODO(step 2): replace with the real UUID once the `qmd` database is
-      // created in the organization's Cloudflare account (scoped API token).
-      // The placeholder is fine for `wrangler dev` / `--local` migrations.
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "9b44dc6c-a114-4bf5-8c4d-bb24f9dacde8",
       // Drizzle writes migrations here (drizzle.config.ts `out`); wrangler
       // applies them with `d1 migrations apply`.
       "migrations_dir": "drizzle"
