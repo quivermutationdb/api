@@ -73,6 +73,7 @@ import json
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from itertools import permutations, product
+from typing import Iterable, Optional
 
 from qmd.canonicalize import (
     canonical_form,
@@ -491,17 +492,23 @@ def explore_mutation_class(seed: Matrix, bound: int = 2) -> MutationClassResult:
 # Seed generation
 # ---------------------------------------------------------------------------
 
-def generate_seed_quivers(max_vertices: int = 4, bound: int = 2) -> list[Matrix]:
+def generate_seed_quivers(max_vertices: int = 4, bound: int = 2,
+                          ranks: Optional[Iterable[int]] = None) -> list[Matrix]:
     """
     Enumerate one representative per isomorphism class of skew-symmetric
     {0, +-1, ..., +-bound}-matrices of size n x n, for n in [1, max_vertices].
+
+    `ranks` restricts enumeration to the given vertex counts (overriding the
+    [1, max_vertices] range).  Mutation preserves rank, so per-rank generation
+    is exact: no seed, orbit, or gluing ever crosses ranks.
 
     Returns canonical-form matrices — one per distinct unlabeled quiver.
     """
     seen  : set[Matrix]   = set()
     seeds : list[Matrix]  = []
 
-    for n in range(1, max_vertices + 1):
+    for n in (sorted(ranks) if ranks is not None
+              else range(1, max_vertices + 1)):
         upper = [(i, j) for i in range(n) for j in range(i + 1, n)]
         for combo in product(range(-bound, bound + 1), repeat=len(upper)):
             rows = [[0] * n for _ in range(n)]
@@ -564,7 +571,8 @@ class GenerationResult:
         return self.closed_closed_merges + self.closed_open_merges + self.open_open_gluings
 
 
-def run_generation(max_vertices: int = 4, bound: int = 2) -> GenerationResult:
+def run_generation(max_vertices: int = 4, bound: int = 2,
+                   ranks: Optional[Iterable[int]] = None) -> GenerationResult:
     """
     Full four-phase generation pipeline.
 
@@ -585,9 +593,13 @@ def run_generation(max_vertices: int = 4, bound: int = 2) -> GenerationResult:
     Phase 4 — Consistency assertions
         Every mc_id key must equal mutation_class_id(canonical_rep).
         Every quiver_id key must equal quiver_id(stored matrix).
+
+    `ranks` restricts the pipeline to the given vertex counts (see
+    generate_seed_quivers); mutation preserves rank, so a per-rank run
+    produces exactly the rank-n slice of the full run.
     """
     result = GenerationResult()
-    seeds  = generate_seed_quivers(max_vertices, bound)
+    seeds  = generate_seed_quivers(max_vertices, bound, ranks=ranks)
 
     # --- Phase 2: BFS ---
     # We run BFS for every seed whose quiver_id is not yet covered.

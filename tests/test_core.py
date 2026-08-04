@@ -495,7 +495,7 @@ check('open+open does not raise', not raised_oo)
 # ---------------------------------------------------------------------------
 # Mutation-acyclic subquiver fallback (Markov heredity)
 # ---------------------------------------------------------------------------
-from qmd.crud import _resolve_mutation_acyclic
+from qmd.class_properties import resolve_mutation_acyclic as _resolve_mutation_acyclic
 from qmd.invariants import class_is_mutation_acyclic as _cima
 
 _ma_infos = [

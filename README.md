@@ -32,6 +32,18 @@ npm run dev                # wrangler dev → http://127.0.0.1:8787
 npm run typecheck
 ```
 
+### Loading data
+
+The Python pipeline exports one self-contained SQL file per rank (resumable;
+re-runs skip up-to-date ranks — see `qmd/d1_export.py`):
+
+```bash
+python scripts/populate.py --export-d1 dist/d1   # dist/d1/qmd-n{1..4}.sql
+for f in dist/d1/qmd-n*.sql; do
+  npx wrangler d1 execute qmd --local --file=$f   # --remote for production
+done
+```
+
 ## Structure
 
 ```
