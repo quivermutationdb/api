@@ -1,0 +1,39 @@
+/**
+ * Quiver Mutation Database — one Worker serving the API (/api/*) and the
+ * static frontend (Workers Static Assets). Same origin, no CORS.
+ */
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "qmd",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-01",
+
+  // Static frontend (folded in from the `website` repo in migration step 5;
+  // until then `public/` holds a placeholder page).
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    // Multi-page static site, not an SPA: serve /404.html for missing paths.
+    "not_found_handling": "404-page",
+    // API requests must reach the Worker; everything else is served as assets.
+    "run_worker_first": ["/api/*"]
+  },
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "qmd",
+      // TODO(step 2): replace with the real UUID once the `qmd` database is
+      // created in the organization's Cloudflare account (scoped API token).
+      // The placeholder is fine for `wrangler dev` / `--local` migrations.
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      // Drizzle writes migrations here (drizzle.config.ts `out`); wrangler
+      // applies them with `d1 migrations apply`.
+      "migrations_dir": "drizzle"
+    }
+  ],
+
+  "observability": {
+    "enabled": true
+  }
+}

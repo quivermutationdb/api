@@ -2,6 +2,36 @@
 
 Backend for the [Quiver Mutation Database](https://quivermutationdb.org).
 
+> **Migration in progress:** the backend is moving from Neon (Postgres) +
+> Render (FastAPI) to Cloudflare (Workers + D1). See `CLAUDE.md` for the
+> migration brief. The Python math pipeline (`qmd/`) stays Python and runs
+> offline; only serving moves to the Worker.
+
+## Cloudflare Worker
+
+One Worker serves the API (`/api/*`, Hono + Drizzle over D1) and the static
+frontend (Workers Static Assets from `public/`).
+
+```
+src/
+├── index.ts         # Worker entry point (Hono app + assets fallthrough)
+├── api/index.ts     # API routes, mounted at /api
+└── db/
+    ├── schema.ts    # Drizzle schema (D1/SQLite mirror of the Postgres schema)
+    └── shard.ts     # shardFor(n) — the single DB routing seam
+drizzle/             # Generated SQL migrations (wrangler d1 migrations apply)
+public/              # Static frontend (placeholder until the website repo is folded in)
+wrangler.jsonc       # Worker + D1 + Static Assets config
+```
+
+```bash
+npm install
+npm run cf-typegen         # generate worker-configuration.d.ts (Env types)
+npm run db:migrate:local   # apply migrations to the local D1 database
+npm run dev                # wrangler dev → http://127.0.0.1:8787
+npm run typecheck
+```
+
 ## Structure
 
 ```

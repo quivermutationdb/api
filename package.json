@@ -1,0 +1,25 @@
+{
+  "name": "qmd-worker",
+  "private": true,
+  "type": "module",
+  "description": "Quiver Mutation Database — Cloudflare Worker (API + static frontend)",
+  "license": "CC-BY-4.0",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "cf-typegen": "wrangler types",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate:local": "wrangler d1 migrations apply qmd --local",
+    "db:migrate:remote": "wrangler d1 migrations apply qmd --remote"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.45.2",
+    "hono": "^4.13.0"
+  },
+  "devDependencies": {
+    "drizzle-kit": "^0.31.10",
+    "typescript": "^7.0.2",
+    "wrangler": "^4.118.0"
+  }
+}
