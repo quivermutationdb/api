@@ -1,20 +1,39 @@
 /**
  * API router, mounted at /api by src/index.ts.
  *
- * Endpoints are implemented in migration step 4 (driven by what the live
- * frontend calls, preserving existing response shapes). This scaffold wires
- * up the router, the DB access path (Drizzle over `shardFor`), and the two
- * endpoints that need no frontend-shape verification: /health and /stats.
+ * Routes and response shapes are driven by what the live frontend calls
+ * (browse.html, search.html, quiver.html, class.html, index.html,
+ * download.js in the website repo) and mirror the FastAPI backend
+ * (main.py + qmd/schemas.py): /quivers, /quivers/{id}, /search,
+ * /classes/{id}, /export.  New, brief-mandated additions: /stats,
+ * /classes (browse), /random/quiver, /random/class, /export.csv.
  */
 
 import { asc } from "drizzle-orm";
 import { Hono } from "hono";
 import { rankStats } from "../db/schema";
 import { dbFor } from "../db/shard";
+import { classesRoutes } from "./classes";
+import { exportRoutes } from "./export";
+import { BadRequest, listHandler, quiversRoutes } from "./quivers";
+import { randomRoutes } from "./random";
 
 export const api = new Hono<{ Bindings: Env }>();
 
+// Bad query params (unparseable ints/bools) -> 400, FastAPI-style detail.
+api.onError((err, c) => {
+  if (err instanceof BadRequest) return c.json({ detail: err.message }, 400);
+  console.error(err);
+  return c.json({ detail: "Internal server error" }, 500);
+});
+
 api.get("/health", (c) => c.json({ status: "ok" }));
+
+api.route("/quivers", quiversRoutes);
+api.get("/search", listHandler(100));
+api.route("/classes", classesRoutes);
+api.route("/", exportRoutes);          // /export and /export.csv
+api.route("/random", randomRoutes);
 
 /**
  * Homepage counts, served from the ingest-time aggregates table — never from
