@@ -1,16 +1,308 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Quiver Mutation Database</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Quiver Mutation Database (QMD)</title>
+
+  <!-- Google tag (gtag.js) -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-J4QG6T5TE5"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+    gtag('config', 'G-J4QG6T5TE5');
+  </script>
+
+  <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
+<a class="skip-link" href="#main">Skip to main content</a>
+
+<nav>
+  <a href="/" class="brand">QMD</a>
+  <a href="/" class="active">Home</a>
+  <a href="/about.html">About</a>
+  <a href="/browse.html">Browse</a>
+  <a href="/search.html">Search</a>
+  <a href="/roadmap.html">Roadmap</a>
+  <a href="/wiki.html">Wiki</a>
+  <div class="spacer"></div>
+  <span class="status" id="api-status">connecting…</span>
+</nav>
+
+<main class="page-wide" id="main">
+
   <h1>Quiver Mutation Database</h1>
-  <p>
-    Placeholder page. The static frontend is folded in from the
-    <code>website</code> repo in migration step 5; the API lives under
-    <a href="/api/health"><code>/api</code></a>.
+  <p class="hero-tag">
+    Open research infrastructure for quivers, exchange matrices, and
+    mutation-equivalence classes — curated, citable, and reproducible.
   </p>
+
+  <div class="status-box">
+    <p>
+      <strong>Status:</strong>
+      <span class="badge badge-dev">Under active development</span>
+      <span class="badge badge-closed">Phase 1: Core dataset &amp; identifiers</span>
+    </p>
+    <p>
+      QMD is a curated, citable database of quivers and mutation classes, with
+      rigorously defined invariants and transparent computational provenance.
+      See the <a href="/about.html">About</a> page for the design principles, or
+      the <a href="/roadmap.html">Roadmap</a> for the current phase and what's next.
+    </p>
+  </div>
+
+  <!-- Live stats -->
+  <div class="home-stats" id="home-stats">
+    <div class="stat-card">
+      <div class="num" id="stat-distinct">—</div>
+      <div class="lbl">Distinct quivers</div>
+    </div>
+    <div class="stat-card">
+      <div class="num" id="stat-labeled">—</div>
+      <div class="lbl">Labeled quivers</div>
+    </div>
+    <div class="stat-card">
+      <div class="num">1&ndash;4</div>
+      <div class="lbl">Ranks covered</div>
+    </div>
+  </div>
+
+  <!-- Explore -->
+  <h2 class="home-h">Start exploring</h2>
+  <div class="action-grid">
+    <button type="button" class="action-card" id="random-quiver">
+      <svg class="ac-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="6" cy="7" r="2.2"/><circle cx="18" cy="9" r="2.2"/><circle cx="11" cy="18" r="2.2"/>
+        <path d="M8 7.6l7.8 1.2M16.8 10.8l-4.2 5M9.6 16.2L7 9.1"/>
+      </svg>
+      <span class="ac-title">Random quiver</span>
+      <span class="ac-desc">Jump to a randomly chosen quiver and its invariants.</span>
+    </button>
+    <button type="button" class="action-card" id="random-class">
+      <svg class="ac-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M3 7h3.5l9.5 10H21M3 17h3.5l9.5-10H21"/>
+        <path d="M18 4l3 3-3 3M18 14l3 3-3 3"/>
+      </svg>
+      <span class="ac-title">Random mutation class</span>
+      <span class="ac-desc">Land on a random mutation-equivalence class.</span>
+    </button>
+    <a class="action-card" href="/browse.html">
+      <svg class="ac-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M9 6h11M9 12h11M9 18h11"/>
+        <circle cx="4.5" cy="6" r="1.1"/><circle cx="4.5" cy="12" r="1.1"/><circle cx="4.5" cy="18" r="1.1"/>
+      </svg>
+      <span class="ac-title">Browse the database</span>
+      <span class="ac-desc">Page through every quiver, sortable and filterable.</span>
+    </a>
+    <a class="action-card" href="/search.html">
+      <svg class="ac-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="10.5" cy="10.5" r="6"/><path d="M20 20l-5.2-5.2"/>
+      </svg>
+      <span class="ac-title">Search &amp; filter</span>
+      <span class="ac-desc">Find quivers by rank, Dynkin type, invariants, and more.</span>
+    </a>
+  </div>
+
+  <div class="two-col" style="margin-top:2.75rem">
+    <!-- Featured quiver -->
+    <div class="card featured-quiver">
+      <div class="card-label">Featured quiver</div>
+      <div class="quiver-figure" id="featured-figure">
+        <div class="state-msg" style="padding:2rem"><div class="spinner"></div></div>
+      </div>
+      <div class="featured-id" id="featured-id">&nbsp;</div>
+      <div class="featured-actions">
+        <a class="btn" id="featured-link" href="#">View quiver →</a>
+        <button type="button" class="btn btn-ghost" id="featured-shuffle">Shuffle ⟳</button>
+      </div>
+    </div>
+
+    <!-- Did you know -->
+    <div class="card card-flex">
+      <div class="card-label">Did you know?</div>
+      <p class="fact-text" id="fact-text"></p>
+      <button type="button" class="fact-next" id="fact-next">Another fact →</button>
+    </div>
+  </div>
+
+  <div class="two-col">
+    <!-- Recent updates -->
+    <div class="card">
+      <div class="card-label">Recent updates</div>
+      <ul class="update-list">
+        <li>
+          <span class="when">Jun 2026</span>
+          <span>Mutation-class invariants (mutation-finite, acyclic) now carry explicit provenance for every value.</span>
+        </li>
+        <li>
+          <span class="when">Jun 2026</span>
+          <span>Labeled-quiver counts added, plus CSV and Excel export of any filtered cut of the dataset.</span>
+        </li>
+        <li>
+          <span class="when">May 2026</span>
+          <span>Stable canonical identifiers for quivers and mutation classes, with sortable browsing.</span>
+        </li>
+        <li>
+          <span class="when">May 2026</span>
+          <span>Searchable invariants: rank, Dynkin type, representation type, connectivity, and more.</span>
+        </li>
+      </ul>
+    </div>
+
+    <!-- How to cite -->
+    <div class="card">
+      <div class="cite-head">
+        <div class="card-label" style="margin:0;border:none;padding:0">How to cite</div>
+        <button type="button" class="copy-btn" id="copy-cite">Copy BibTeX</button>
+      </div>
+      <p style="font-size:0.9rem;color:var(--ink-light);margin-bottom:0.9rem">
+        If QMD supports your work, please cite the database:
+      </p>
+      <div class="code-block"><code id="cite-bibtex">@misc{qmd,
+  author       = {Jackson, Blake},
+  title        = {The Quiver Mutation Database},
+  year         = {2026},
+  howpublished = {\url{https://quivermutationdb.org}},
+  note         = {Accessed: <span id="cite-date">2026</span>}
+}</code></div>
+    </div>
+  </div>
+
+  <p style="margin-top:2.5rem">
+    Questions or suggestions? Contact
+    <a href="mailto:jackson@icarm.io">jackson@icarm.io</a>.
+  </p>
+
+</main>
+
+<footer>
+  <span>Quiver Mutation Database (QMD)</span>
+  <span><a href="/acknowledge.html">Acknowledge</a> &middot; <a href="mailto:jackson@icarm.io">jackson@icarm.io</a></span>
+</footer>
+
+<script src="/quiver-draw.js"></script>
+<script>
+const API = '/api';
+
+// ----- "Did you know" facts (rotated) ----------------------------------
+const FACTS = [
+  "Quiver mutation is an involution: mutating at the same vertex twice returns the original quiver.",
+  "Quivers of finite mutation type are classified — they're either rank 2, of Dynkin or affine type, or one of a handful of exceptional families.",
+  "Fomin and Zelevinsky introduced quiver (matrix) mutation in 2002 as the engine behind cluster algebras.",
+  "Two quivers are mutation-equivalent if one can be reached from the other by a finite sequence of mutations.",
+  "An acyclic quiver of Dynkin type A, D, or E generates a cluster algebra of finite type — only finitely many seeds.",
+  "Markov quivers (three vertices, all edges doubled) are the smallest connected quivers of infinite mutation type.",
+  "A quiver's exchange matrix is skew-symmetric, so its mutation class is determined entirely by the upper triangle.",
+  "Mutation classes can be astronomically large: even modest rank-4 quivers can have hundreds of distinct members.",
+];
+
+function showFact(i) {
+  document.getElementById('fact-text').textContent = FACTS[i % FACTS.length];
+}
+let factIdx = Math.floor(Math.random() * FACTS.length);
+showFact(factIdx);
+document.getElementById('fact-next').addEventListener('click', () => showFact(++factIdx));
+
+// ----- Citation copy ---------------------------------------------------
+(function () {
+  const now = new Date();
+  const stamp = now.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+  document.getElementById('cite-date').textContent = stamp;
+  document.getElementById('copy-cite').addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    try {
+      await navigator.clipboard.writeText(document.getElementById('cite-bibtex').textContent);
+      const old = btn.textContent;
+      btn.textContent = 'Copied ✓';
+      setTimeout(() => { btn.textContent = old; }, 1600);
+    } catch (_) {
+      btn.textContent = 'Copy failed';
+    }
+  });
+})();
+
+// ----- Live data: stats, featured quiver, random navigation ------------
+const status = document.getElementById('api-status');
+let total = 0;                       // distinct-quiver count, for random offsets
+
+const DEMO_MATRIX = [[0, 1, -1], [-1, 0, 1], [1, -1, 0]];
+function demoItem() {
+  return {
+    qmd_id: 'Q.n3.demodemodemodemo',
+    mc_id: 'MC.n3.demodemodemodemo',
+    exchange_matrix: DEMO_MATRIX,
+    num_vertices: 3,
+  };
+}
+
+// Fetch one quiver at a (random) offset. Falls back to synthetic demo data.
+async function fetchQuiverAt(offset) {
+  try {
+    const res = await fetch(`${API}/quivers?limit=1&offset=${offset}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (total === 0 && data.total) total = data.total;
+    status.textContent = 'connected';
+    if (data.distinct_total != null) {
+      document.getElementById('stat-distinct').textContent = data.distinct_total.toLocaleString();
+    }
+    if (data.labeled_total != null) {
+      document.getElementById('stat-labeled').textContent = data.labeled_total.toLocaleString();
+    }
+    return (data.items && data.items[0]) || demoItem();
+  } catch (e) {
+    status.textContent = 'demo mode';
+    document.getElementById('stat-distinct').textContent = '724';
+    document.getElementById('stat-labeled').textContent = '3,754';
+    return demoItem();
+  }
+}
+
+const randOffset = () => (total > 0 ? Math.floor(Math.random() * total) : 0);
+
+function drawFeatured(item) {
+  const fig = document.getElementById('featured-figure');
+  fig.innerHTML = '';
+  if (item.exchange_matrix && window.renderQuiver) {
+    fig.appendChild(renderQuiver(item.exchange_matrix, { size: 200 }));
+  } else {
+    fig.innerHTML = '<div class="state-msg">No diagram</div>';
+  }
+  document.getElementById('featured-id').textContent = item.qmd_id;
+  document.getElementById('featured-link').href =
+    `/quiver.html?id=${encodeURIComponent(item.qmd_id)}`;
+}
+
+async function loadFeatured() {
+  const fig = document.getElementById('featured-figure');
+  fig.innerHTML = '<div class="state-msg" style="padding:2rem"><div class="spinner"></div></div>';
+  drawFeatured(await fetchQuiverAt(randOffset()));
+}
+
+document.getElementById('featured-shuffle').addEventListener('click', loadFeatured);
+
+// Random-navigation buttons: fetch a fresh random quiver, then go to its page.
+async function goRandom(key, page) {
+  const btn = key === 'qmd_id' ? document.getElementById('random-quiver')
+                               : document.getElementById('random-class');
+  btn.style.opacity = '0.6';
+  const item = await fetchQuiverAt(randOffset());
+  location.href = `/${page}?id=${encodeURIComponent(item[key])}`;
+}
+document.getElementById('random-quiver').addEventListener('click', () => goRandom('qmd_id', 'quiver.html'));
+document.getElementById('random-class').addEventListener('click', () => goRandom('mc_id', 'class.html'));
+
+// Initial load: one request to seed `total` + stats, then draw a random
+// featured quiver (so it isn't always the trivial offset-0 quiver).
+(async () => {
+  await fetchQuiverAt(0);   // learns total + populates the stat cards
+  await loadFeatured();     // now `total` is known, so this is genuinely random
+})();
+</script>
+
 </body>
 </html>
+</content>
+</invoke>

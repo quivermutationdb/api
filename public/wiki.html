@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Wiki — QMD</title>
+  <!-- Google tag (gtag.js) -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-J4QG6T5TE5"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+    gtag('config', 'G-J4QG6T5TE5');
+  </script>
+
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+<a class="skip-link" href="#page-content">Skip to main content</a>
+
+<nav>
+  <a href="/" class="brand">QMD</a>
+  <a href="/">Home</a>
+  <a href="/about.html">About</a>
+  <a href="/browse.html">Browse</a>
+  <a href="/search.html">Search</a>
+  <a href="/roadmap.html">Roadmap</a>
+  <a href="/wiki.html" class="active">Wiki</a>
+  <div class="spacer"></div>
+  <span class="status">reference</span>
+</nav>
+
+<!--
+  Canonical definitions of every DB invariant / property. Keep in sync with the
+  API (separate `api` repo): when an invariant is added there — see the "Adding a
+  new invariant" checklist in api/qmd/models.py — add a <section class="wiki-section"
+  id="x"> below defining it (with a code snippet if it's computed), add it to the
+  table of contents, and link it from the relevant pages (quiver/class property
+  labels and browse/search column headers) via /wiki.html#x. A section's id IS the
+  deep-link anchor those pages point at, so don't rename ids casually.
+-->
+<main class="page-wide" id="page-content">
+  <div class="page-header">
+    <h1>Wiki</h1>
+    <p>Definitions of every quiver and mutation-class property in the database, with the exact logic used to compute each one.</p>
+  </div>
+
+  <div class="wiki-layout">
+    <aside class="wiki-toc" aria-label="Contents">
+      <div class="wiki-toc-group">Quivers</div>
+      <a href="#quiver">Quiver / exchange matrix</a>
+      <a href="#rank">Rank</a>
+      <a href="#mutation">Mutation</a>
+      <a href="#quiver-id">Canonical form &amp; ID</a>
+
+      <div class="wiki-toc-group">Quiver properties</div>
+      <a href="#acyclic">Acyclic</a>
+      <a href="#connected">Connected</a>
+      <a href="#max-edge">Max edge weight</a>
+      <a href="#bipartite">Bipartite</a>
+      <a href="#abundant">Abundant</a>
+      <a href="#planar">Planar</a>
+      <a href="#representation-type">Representation type</a>
+      <a href="#symmetry-group">Symmetry group</a>
+
+      <div class="wiki-toc-group">Mutation classes</div>
+      <a href="#mutation-class">Mutation class</a>
+      <a href="#labeled-vs-distinct">Labeled vs. distinct</a>
+      <a href="#dynkin-type">Dynkin type</a>
+      <a href="#mutation-finite">Mutation-finite / type</a>
+      <a href="#mutation-class-size">Mutation class size</a>
+      <a href="#explored-frontier">Explored frontier</a>
+
+      <div class="wiki-toc-group">Acyclicity</div>
+      <a href="#mutation-acyclic">Mutation-acyclic</a>
+      <a href="#banff">Banff</a>
+      <a href="#louise">Louise</a>
+      <a href="#p-prime">P′</a>
+      <a href="#three-state">Three-state &amp; provenance</a>
+    </aside>
+
+    <div class="wiki-content">
+
+      <p class="wiki-intro">
+        A <b>quiver</b> here is a finite directed multigraph with no loops or 2-cycles,
+        encoded by a skew-symmetric integer <b>exchange matrix</b> B = (b<sub>ij</sub>):
+        b<sub>ij</sub> &gt; 0 means b<sub>ij</sub> arrows from i to j, and b<sub>ji</sub> = −b<sub>ij</sub>.
+        Every record in the database is one isomorphism class of such a quiver, or one
+        mutation class of them. The current dataset covers rank ≤ 4 with |b<sub>ij</sub>| ≤ 2.
+      </p>
+
+      <!-- ============ QUIVERS ============ -->
+      <section class="wiki-section" id="quiver">
+        <h2>Quiver / exchange matrix</h2>
+        <p>An <i>unlabeled</i> quiver is a skew-symmetric integer matrix up to simultaneous
+        permutation of its rows and columns (relabeling the vertices). The matrix entry
+        b<sub>ij</sub> records the signed number of arrows between vertices i and j; the sign
+        gives the direction. The <b>Matrix</b> column on Browse and each quiver page shows
+        this exchange matrix (row-major).</p>
+      </section>
+
+      <section class="wiki-section" id="rank">
+        <h2>Rank</h2>
+        <p>The number of vertices, i.e. the size n of the n×n exchange matrix. Mutation never
+        changes the rank, so it is shared by every quiver in a mutation class.</p>
+      </section>
+
+      <section class="wiki-section" id="mutation">
+        <h2>Mutation</h2>
+        <p>Mutation at a vertex k is the fundamental operation of cluster theory. It produces a
+        new quiver B′ from B by the skew-symmetric mutation rule:</p>
+        <p class="wiki-formula">
+          b′<sub>ij</sub> = −b<sub>ij</sub> &nbsp; if i = k or j = k,<br>
+          b′<sub>ij</sub> = b<sub>ij</sub> + ( |b<sub>ik</sub>|·b<sub>kj</sub> + b<sub>ik</sub>·|b<sub>kj</sub>| ) / 2 &nbsp; otherwise.
+        </p>
+        <p>Mutation is an involution: mutating twice at the same vertex returns the original quiver.</p>
+        <pre class="code-block"><code>def mutate(matrix, k):
+    n = len(matrix)
+    rows = [list(row) for row in matrix]
+    for i in range(n):
+        for j in range(n):
+            if i == k or j == k:
+                rows[i][j] = -matrix[i][j]
+            else:
+                b_ik, b_kj = matrix[i][k], matrix[k][j]
+                rows[i][j] = (matrix[i][j]
+                    + (abs(b_ik) * b_kj + b_ik * abs(b_kj)) // 2)
+    return tuple(tuple(r) for r in rows)</code></pre>
+      </section>
+
+      <section class="wiki-section" id="quiver-id">
+        <h2>Canonical form &amp; quiver ID</h2>
+        <p>Two matrices that differ only by a relabeling of the vertices are the same unlabeled
+        quiver. To give each isomorphism class a single stable identifier, we compute a
+        <b>canonical form</b> (the unique representative of the class) and hash it. The canonical
+        form is found with <i>nauty</i> (graph canonical labeling) when available, falling back to
+        the lexicographically smallest matrix over all n! relabelings. The ID is
+        <code>Q.n{rank}.{sha256[:16]}</code>; a mutation class is <code>MC.n{rank}.{…}</code>.</p>
+        <pre class="code-block"><code>def quiver_id(matrix):
+    canon = canonical_form(matrix)           # nauty, or lex-min over n! relabelings
+    blob = json.dumps(to_lists(canon), separators=(',', ':'))
+    return "Q.n%d.%s" % (len(canon), sha256(blob)[:16])</code></pre>
+      </section>
+
+      <!-- ============ QUIVER PROPERTIES ============ -->
+      <section class="wiki-section" id="acyclic">
+        <h2>Acyclic</h2>
+        <p>The quiver has no directed cycle (drawing an edge i → j whenever b<sub>ij</sub> &gt; 0).
+        Acyclic quivers are the well-understood base case of cluster theory: the path algebra kQ
+        is finite-dimensional and its <a href="#representation-type">representation type</a> is
+        defined. Computed by an iterative depth-first three-colouring — a back-edge to a vertex
+        still on the stack (GRAY) witnesses a cycle.</p>
+        <pre class="code-block"><code>def is_acyclic(matrix):
+    n = len(matrix)
+    adj = {i: [j for j in range(n) if matrix[i][j] &gt; 0] for i in range(n)}
+    WHITE, GRAY, BLACK = 0, 1, 2
+    color = [WHITE] * n
+    for start in range(n):
+        if color[start] != WHITE:
+            continue
+        stack = [(start, 0)]; color[start] = GRAY
+        while stack:
+            u, idx = stack[-1]
+            if idx &lt; len(adj[u]):
+                stack[-1] = (u, idx + 1); v = adj[u][idx]
+                if color[v] == GRAY:   return False     # back-edge =&gt; cycle
+                if color[v] == WHITE:  color[v] = GRAY; stack.append((v, 0))
+            else:
+                color[u] = BLACK; stack.pop()
+    return True</code></pre>
+      </section>
+
+      <section class="wiki-section" id="connected">
+        <h2>Connected</h2>
+        <p>The underlying undirected graph — an edge wherever b<sub>ij</sub> ≠ 0 — is connected.
+        A single-vertex quiver is connected by convention. Computed by a graph traversal from
+        vertex 0: the quiver is connected iff every vertex is reached.</p>
+        <pre class="code-block"><code>def is_connected(matrix):
+    n = len(matrix)
+    if n &lt;= 1: return True
+    adj = {i: {j for j in range(n) if matrix[i][j] != 0} for i in range(n)}
+    seen, stack = {0}, [0]
+    while stack:
+        v = stack.pop()
+        for w in adj[v]:
+            if w not in seen: seen.add(w); stack.append(w)
+    return len(seen) == n</code></pre>
+      </section>
+
+      <section class="wiki-section" id="max-edge">
+        <h2>Max edge weight</h2>
+        <p>The largest |b<sub>ij</sub>| in the quiver — the heaviest single arrow-bundle. A quiver
+        is <i>simply-laced</i> exactly when its max edge weight is ≤ 1. The current dataset is
+        generated within the bound |b<sub>ij</sub>| ≤ 2.</p>
+        <pre class="code-block"><code>def max_edge(matrix):
+    return max(abs(matrix[i][j])
+               for i in range(len(matrix)) for j in range(len(matrix)))</code></pre>
+      </section>
+
+      <section class="wiki-section" id="bipartite">
+        <h2>Bipartite</h2>
+        <p>Every vertex is a pure source or a pure sink — no vertex has both an incoming and an
+        outgoing arrow. Equivalently, the vertices two-colour so that every arrow goes from one
+        colour to the other.</p>
+        <pre class="code-block"><code>def is_bipartite(m):
+    n = len(m)
+    for i in range(n):
+        has_out = any(m[i][j] &gt; 0 for j in range(n))
+        has_in  = any(m[i][j] &lt; 0 for j in range(n))
+        if has_out and has_in:
+            return False
+    return True</code></pre>
+      </section>
+
+      <section class="wiki-section" id="abundant">
+        <h2>Abundant</h2>
+        <p>Connected, on at least two vertices, with |b<sub>ij</sub>| ≥ 2 for <i>every</i> pair of
+        vertices i ≠ j — every arrow-bundle is a double arrow or heavier. The
+        <a href="#mutation-acyclic">Markov quiver</a> is the smallest abundant quiver.</p>
+        <pre class="code-block"><code>def is_abundant(m):
+    n = len(m)
+    if n &lt; 2: return False
+    return all(abs(m[i][j]) &gt;= 2
+               for i in range(n) for j in range(i + 1, n))</code></pre>
+      </section>
+
+      <section class="wiki-section" id="planar">
+        <h2>Planar</h2>
+        <p>The underlying multigraph can be drawn in the plane without crossing edges. Every graph
+        on ≤ 4 vertices is planar (the obstructions K₅ and K₃,₃ need 5+ vertices), so for the
+        current rank ≤ 4 dataset this is always true; it is reported as <i>unknown</i> for larger
+        ranks until a full planarity test is wired in.</p>
+      </section>
+
+      <section class="wiki-section" id="representation-type">
+        <h2>Representation type</h2>
+        <p>For an <a href="#acyclic">acyclic</a> quiver Q, the path algebra kQ has a
+        <b>representation type</b> — <i>finite</i>, <i>tame</i>, or <i>wild</i> — governing how
+        complicated its indecomposable representations are. It is read off the symmetric Tits form
+        M = 2I − |B|: positive definite ⟹ finite (Dynkin), positive semidefinite ⟹ tame
+        (Euclidean / extended Dynkin), indefinite ⟹ wild. Undefined (null) when Q is not acyclic,
+        since kQ is then infinite-dimensional. The minors are computed with exact integer
+        determinants, so the classification is exact.</p>
+        <pre class="code-block"><code>def representation_type(m):
+    if not is_acyclic(m):
+        return None                                   # kQ infinite-dimensional
+    n = len(m)
+    M = [[2 if i == j else -abs(m[i][j]) for j in range(n)] for i in range(n)]
+    if positive_definite(M):       return "finite"    # Dynkin
+    if positive_semidefinite(M):   return "tame"      # Euclidean
+    return "wild"                                      # indefinite</code></pre>
+      </section>
+
+      <section class="wiki-section" id="symmetry-group">
+        <h2>Symmetry group</h2>
+        <p>The automorphism group of the <i>labeled</i> quiver: all vertex permutations σ that
+        preserve the exchange matrix, b<sub>σ(i)σ(j)</sub> = b<sub>ij</sub>. Reported as its order,
+        a name (e.g. Z/2, S₃), and a small generating set. Computed by brute force over all n!
+        permutations (exact for small n).</p>
+        <pre class="code-block"><code>def symmetry_group(m):
+    n = len(m)
+    elements = [p for p in permutations(range(n))
+                if all(m[p[i]][p[j]] == m[i][j]
+                       for i in range(n) for j in range(n))]
+    return {"order": len(elements), "name": group_name(elements), ...}</code></pre>
+      </section>
+
+      <!-- ============ MUTATION CLASSES ============ -->
+      <section class="wiki-section" id="mutation-class">
+        <h2>Mutation class</h2>
+        <p>The mutation class of a quiver is the set of all quivers reachable from it by any
+        sequence of <a href="#mutation">mutations</a>. It is the natural equivalence class in
+        cluster theory: mutation-class invariants (Dynkin type, mutation-finiteness, the
+        acyclicity conditions) are shared by every member. Each class is generated here by a
+        breadth-first search, with classes that share a quiver glued together (union-find).</p>
+      </section>
+
+      <section class="wiki-section" id="labeled-vs-distinct">
+        <h2>Labeled vs. distinct quivers</h2>
+        <p>A mutation class can be viewed two ways. The <b>labeled orbit</b> is every labeled
+        matrix reached by mutation — the same unlabeled quiver appears once per vertex-labeling.
+        The <b>distinct quivers</b> are the underlying isomorphism classes (each
+        <a href="#quiver-id">quiver ID</a> once). Browse and the class page let you switch between
+        them; exactly one distinct quiver is the <b>canonical representative</b> (the lex-minimal
+        matrix over all relabelings of the whole orbit).</p>
+        <pre class="code-block"><code>def canonical_class_rep(labeled_matrices):
+    # lex-min over all relabelings of all matrices in the orbit
+    return min((apply_permutation(m, perm)
+                for m in labeled_matrices
+                for perm in permutations(range(len(m)))), key=lex_key)</code></pre>
+      </section>
+
+      <section class="wiki-section" id="dynkin-type">
+        <h2>Dynkin type</h2>
+        <p>For a mutation-finite class of finite type, the Cartan–Killing label of the
+        corresponding root system (A<sub>n</sub>, D<sub>n</sub>, E₆, E₇, E₈, …). These are exactly
+        the classes whose acyclic members have positive-definite
+        <a href="#representation-type">Tits form</a>. Null for open / infinite-type classes.</p>
+      </section>
+
+      <section class="wiki-section" id="mutation-finite">
+        <h2>Mutation-finite / mutation type</h2>
+        <p>A class is <b>mutation-finite</b> (closed) if its mutation class is a finite set, and
+        <b>mutation-infinite</b> (open) otherwise. Generation explores within a bounded region
+        (|b<sub>ij</sub>| ≤ 2); a class that never escapes the bound is proved finite, while one
+        that hits the boundary is infinite. The class page distinguishes:</p>
+        <ul>
+          <li><b>Mutation-finite (proved)</b> — the whole class was enumerated.</li>
+          <li><b>Mutation-infinite (proved)</b> — a bounded mutation reached |b<sub>ij</sub>| ≥ 3 (Derksen–Owen).</li>
+          <li><b>Mutation-infinite (expected)</b> — strong evidence but not yet a proof.</li>
+        </ul>
+      </section>
+
+      <section class="wiki-section" id="mutation-class-size">
+        <h2>Mutation class size</h2>
+        <p>The number of labeled matrices in the mutation class (the size of the labeled orbit).
+        Finite for mutation-finite classes; rendered as ∞ for open classes, where the listed
+        number is the <a href="#explored-frontier">explored</a> portion only.</p>
+      </section>
+
+      <section class="wiki-section" id="explored-frontier">
+        <h2>Explored frontier</h2>
+        <p>For an open class, the number of explored quivers that have a mutation leaving the
+        bounded region — the boundary of what was enumerated. It measures how much of an infinite
+        class the bounded search saw.</p>
+      </section>
+
+      <!-- ============ ACYCLICITY ============ -->
+      <section class="wiki-section" id="mutation-acyclic">
+        <h2>Mutation-acyclic</h2>
+        <p>A class is <b>mutation-acyclic</b> if some quiver in it is <a href="#acyclic">acyclic</a>.
+        Searching the class for an acyclic member proves <i>True</i> directly, and a fully-explored
+        (closed) class with no acyclic member proves <i>False</i>.</p>
+        <pre class="code-block"><code>def class_is_mutation_acyclic(members, is_open):
+    if any(is_acyclic(m) for m in members):
+        return True
+    return False if not is_open else None    # closed: proved; open: unknown</code></pre>
+        <p>For an <i>open</i> class the search alone can only say <i>unknown</i>. We then use
+        <b>heredity</b>: mutation-acyclicity is inherited by induced subquivers, so if any member
+        contains an induced subquiver already known <i>not</i> to be mutation-acyclic, the whole
+        class is not mutation-acyclic. The base case is the <b>Markov quiver</b> (rank 3, all
+        |b<sub>ij</sub>| = 2, cyclically oriented), whose entire mutation class is just two cyclic
+        quivers — never acyclic. Resolving classes in ascending rank lets that propagate upward.</p>
+        <pre class="code-block"><code># By heredity a not-mutation-acyclic subquiver of any size forces a
+# not-mutation-acyclic (n-1)-subquiver, so deleting one vertex suffices.
+def has_known_non_ma_subquiver(members, known_false):
+    for m in members:
+        n = len(m)
+        if n &lt; 4:                                  # smallest is Markov (rank 3)
+            continue
+        for k in range(n):                          # delete one vertex
+            if known_false.get(quiver_id(delete_vertex(m, k))):
+                return True
+    return False</code></pre>
+      </section>
+
+      <section class="wiki-section" id="banff">
+        <h2>Banff</h2>
+        <p>The <b>Banff</b> condition is a sufficient combinatorial criterion for <i>local
+        acyclicity</i> of the cluster algebra (Muller). It is checked by recursive
+        <b>source-deletion</b>: a quiver passes if it is acyclic, or it has a source vertex k and
+        a neighbour j such that deleting k and (separately) deleting j each leave a quiver whose
+        mutation class still satisfies the condition. The search runs over the mutation class.</p>
+        <pre class="code-block"><code>def check_condition(q, kind):           # kind in {"banff", "louise", "p_prime"}
+    if is_acyclic(q):
+        return True                                 # base case
+    for k in sources(q):                            # a source vertex
+        if not cond_class(delete_vertex(q, k), kind):
+            continue
+        if kind == "p_prime":
+            return True                             # P': one deletable source suffices
+        for j in neighbours(k, q):                  # Banff/Louise also need a neighbour j
+            if not cond_class(delete_vertex(q, j), kind):
+                continue
+            if kind == "banff":
+                return True
+            if cond_class(delete_two(q, k, j), kind):   # Louise also needs Q \ {k, j}
+                return True
+    return False</code></pre>
+      </section>
+
+      <section class="wiki-section" id="louise">
+        <h2>Louise</h2>
+        <p>The <b>Louise</b> condition strengthens <a href="#banff">Banff</a>: in addition to the
+        deletions of the source k and a neighbour j, the quiver with <i>both</i> k and j removed
+        must again satisfy the condition (the third branch in the code above). Louise also implies
+        local acyclicity.</p>
+      </section>
+
+      <section class="wiki-section" id="p-prime">
+        <h2>P′</h2>
+        <p>The <b>P′</b> condition is the weakest of the three source-deletion criteria: a quiver
+        passes if it is acyclic, or it has a source k whose deletion leaves a quiver still
+        satisfying P′ — no neighbour condition is required. (A distinct stronger property
+        <b>P</b> is not yet tracked.)</p>
+      </section>
+
+      <section class="wiki-section" id="three-state">
+        <h2>Three-state results &amp; provenance</h2>
+        <p>The semidecidable properties (<a href="#banff">Banff</a>, <a href="#louise">Louise</a>,
+        <a href="#p-prime">P′</a>) are reported with three states, never a guess:</p>
+        <ul>
+          <li><b>Yes</b> — a witness (mutation sequence + source-deletion certificate) was found.</li>
+          <li><b>No</b> — the search was provably exhaustive (the whole finite mutation class was
+          covered with no depth, timeout, or arrow-weight truncation) and no witness exists.</li>
+          <li><b>Unknown</b> — the search was truncated before a witness or a proof.</li>
+        </ul>
+        <p>A <code>truncated</code> flag is threaded through the entire search; a <b>No</b> is only
+        reported when nothing was ever truncated, so it is a genuine proof rather than a failed
+        bounded search. The class page records this <i>provenance</i> for each property.</p>
+      </section>
+
+      <p class="wiki-foot">Code snippets are condensed from the open pipeline (canonicalization,
+      generation, and invariants). They show the deciding logic; some helper functions are elided.</p>
+
+    </div>
+  </div>
+</main>
+
+<footer>
+  <span>Quiver Mutation Database (QMD)</span>
+  <span><a href="/acknowledge.html">Acknowledge</a> &middot; <a href="mailto:jackson@icarm.io">jackson@icarm.io</a></span>
+</footer>
+
+</body>
+</html>

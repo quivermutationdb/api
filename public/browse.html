@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Browse Quivers — QMD</title>
+  <!-- Google tag (gtag.js) -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-J4QG6T5TE5"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+    gtag('config', 'G-J4QG6T5TE5');
+  </script>
+
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to main content</a>
+
+<nav>
+  <a href="/" class="brand">QMD</a>
+  <a href="/">Home</a>
+  <a href="/about.html">About</a>
+  <a href="/browse.html" class="active">Browse</a>
+  <a href="/search.html">Search</a>
+  <a href="/roadmap.html">Roadmap</a>
+  <a href="/wiki.html">Wiki</a>
+  <div class="spacer"></div>
+  <span class="status" id="api-status">connecting…</span>
+</nav>
+
+<main class="page" id="main">
+  <div class="page-header">
+    <h1>Browse Quivers</h1>
+    <p>All unlabeled quivers in the database, one record per isomorphism class.</p>
+  </div>
+
+  <div class="filters">
+    <div class="filter-group">
+      <label for="filter-rank">Rank (vertices)</label>
+      <select id="filter-rank">
+        <option value="">All ranks</option>
+        <option value="1">1</option>
+        <option value="2">2</option>
+        <option value="3">3</option>
+        <option value="4">4</option>
+      </select>
+    </div>
+    <div class="filter-group">
+      <label for="filter-connected">Connected</label>
+      <select id="filter-connected">
+        <option value="">All</option>
+        <option value="true">Connected</option>
+        <option value="false">Disconnected</option>
+      </select>
+    </div>
+    <div class="filter-group">
+      <label for="filter-open">Class type</label>
+      <select id="filter-open">
+        <option value="">All</option>
+        <option value="false">Finite type (closed)</option>
+        <option value="true">Open (unbounded)</option>
+      </select>
+    </div>
+    <div class="filter-group">
+      <label for="filter-dynkin">Dynkin type</label>
+      <input type="text" id="filter-dynkin" placeholder="e.g. A3, D4, E6">
+    </div>
+    <button class="btn" onclick="applyFilters()">Filter</button>
+    <button class="btn btn-ghost" onclick="resetFilters()">Reset</button>
+    <button class="btn btn-ghost" onclick="openDownload()">Download ↓</button>
+  </div>
+
+  <div class="browse-controls">
+    <div class="orbit-controls" role="group" aria-label="Quiver view">
+      <button class="view-btn active" id="btn-distinct" onclick="setScope('distinct')">Distinct quivers</button>
+      <button class="view-btn" id="btn-labeled" onclick="setScope('labelings')">Labeled quivers</button>
+    </div>
+    <div class="stats-row" id="stats-row" style="display:none">
+      <span>Showing <b id="stat-showing">—</b> <span id="stat-noun">quivers</span></span>
+      <span>Page <b id="stat-page">—</b> of <b id="stat-pages">—</b></span>
+    </div>
+  </div>
+
+  <div class="table-wrap">
+    <table id="quiver-table">
+      <thead>
+        <tr>
+          <th data-col="qmd_id">Quiver ID <a class="col-info" href="/wiki.html#quiver-id" title="Definition" aria-label="Quiver ID definition">ⓘ</a> <span class="sort-arrow">↕</span></th>
+          <th data-col="num_vertices">Rank <a class="col-info" href="/wiki.html#rank" title="Definition" aria-label="Rank definition">ⓘ</a> <span class="sort-arrow">↕</span></th>
+          <th data-col="dynkin_type">Dynkin type <a class="col-info" href="/wiki.html#dynkin-type" title="Definition" aria-label="Dynkin type definition">ⓘ</a> <span class="sort-arrow">↕</span></th>
+          <th>Rep. type <a class="col-info" href="/wiki.html#representation-type" title="Definition" aria-label="Representation type definition">ⓘ</a></th>
+          <th data-col="max_edge">Max edge <a class="col-info" href="/wiki.html#max-edge" title="Definition" aria-label="Max edge definition">ⓘ</a> <span class="sort-arrow">↕</span></th>
+          <th>Acyclic <a class="col-info" href="/wiki.html#acyclic" title="Definition" aria-label="Acyclic definition">ⓘ</a></th>
+          <th>Connected <a class="col-info" href="/wiki.html#connected" title="Definition" aria-label="Connected definition">ⓘ</a></th>
+          <th>Bipartite <a class="col-info" href="/wiki.html#bipartite" title="Definition" aria-label="Bipartite definition">ⓘ</a></th>
+          <th data-col="class_type">Class <a class="col-info" href="/wiki.html#mutation-finite" title="Definition" aria-label="Class type definition">ⓘ</a> <span class="sort-arrow">↕</span></th>
+          <th data-col="class_size">Mutation class size <a class="col-info" href="/wiki.html#mutation-class-size" title="Definition" aria-label="Mutation class size definition">ⓘ</a> <span class="sort-arrow">↕</span></th>
+          <th>Mutation class <a class="col-info" href="/wiki.html#mutation-class" title="Definition" aria-label="Mutation class definition">ⓘ</a></th>
+          <th>Matrix <a class="col-info" href="/wiki.html#quiver" title="Definition" aria-label="Exchange matrix definition">ⓘ</a></th>
+        </tr>
+      </thead>
+      <tbody id="table-body">
+        <tr><td colspan="12">
+          <div class="state-msg">
+            <div class="spinner"></div>
+            Loading quivers…
+          </div>
+        </td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="pagination" id="pagination"></div>
+</main>
+
+<script src="/xlsx-lite.js"></script>
+<script src="/download.js"></script>
+<script>
+const API = '/api';
+const PAGE_SIZE = 50;
+let currentPage = 1;
+let totalCount = 0;
+let distinctTotal = 0;
+let labeledTotal = 0;
+let scope = 'distinct';            // 'distinct' | 'labelings'
+let sortCol = 'num_vertices';
+let sortDir = 'asc';
+let filters = {};
+
+const DASH = '<span style="color:var(--rule)">—</span>';
+const yncell = v => v === true ? 'Yes' : v === false ? 'No' : DASH;
+
+async function fetchQuivers(page = 1) {
+  const offset = (page - 1) * PAGE_SIZE;
+  const params = new URLSearchParams({
+    limit: PAGE_SIZE,
+    offset,
+    scope,
+    sort: sortCol,
+    dir: sortDir,
+    ...filters,
+  });
+  // Remove empty params
+  for (const [k, v] of [...params.entries()]) {
+    if (!v) params.delete(k);
+  }
+
+  try {
+    const res = await fetch(`${API}/quivers?${params}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    document.getElementById('api-status').textContent = 'connected';
+    return await res.json();
+  } catch (e) {
+    // Demo mode: generate synthetic data when API isn't live yet
+    return demoData(offset);
+  }
+}
+
+function demoData(offset) {
+  // Synthetic rows so the page is useful before the API is live
+  const types = ['A','D','E','—'];
+  const dynkin = ['A1','A2','A3','A4','D4','D5','E6','E7','E8','—','—','—'];
+  const rows = [];
+  for (let i = 0; i < PAGE_SIZE; i++) {
+    const idx = offset + i;
+    const n = (idx % 4) + 1;
+    const isOpen = idx % 3 === 0;
+    const dyn = dynkin[idx % dynkin.length];
+    rows.push({
+      qmd_id: `Q.n${n}.${(0xdeadbeef + idx * 0x9e3779b9).toString(16).slice(0,16).padEnd(16,'0')}`,
+      num_vertices: n,
+      dynkin_type: isOpen ? null : dyn,
+      representation_type: isOpen ? 'wild' : ['finite','tame','wild'][idx % 3],
+      max_edge: (idx % 2) + 1,
+      is_acyclic: !isOpen,
+      is_connected: true,
+      is_bipartite: idx % 2 === 0,
+      is_open: isOpen,
+      class_size: isOpen ? null : [2,14,50,132][n-1],
+      exchange_matrix: [[0, 1], [-1, 0]],
+      mc_id: `MC.n${n}.${(0xcafebabe + idx * 0x6c62272e).toString(16).slice(0,16).padEnd(16,'0')}`,
+    });
+  }
+  document.getElementById('api-status').textContent = 'demo mode';
+  return { items: rows, total: 724, distinct_total: 724, labeled_total: 4326 };
+}
+
+function renderTable(data) {
+  const tbody = document.getElementById('table-body');
+  totalCount = data.total;
+  if (data.distinct_total != null) distinctTotal = data.distinct_total;
+  if (data.labeled_total != null)  labeledTotal = data.labeled_total;
+  document.getElementById('stat-noun').textContent =
+    scope === 'labelings' ? 'labeled quivers' : 'quivers';
+
+  if (!data.items || data.items.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="12">
+      <div class="state-msg">
+        <span class="mono-label">No results</span>
+        No quivers match the current filters.
+      </div>
+    </td></tr>`;
+    document.getElementById('stats-row').style.display = 'none';
+    document.getElementById('pagination').innerHTML = '';
+    return;
+  }
+
+  tbody.innerHTML = data.items.map(q => `
+    <tr>
+      <td><a href="/quiver.html?id=${encodeURIComponent(q.qmd_id)}">${q.qmd_id}</a></td>
+      <td class="mono">${q.num_vertices}</td>
+      <td class="mono">${q.dynkin_type ?? '<span style="color:var(--rule)">—</span>'}</td>
+      <td class="mono">${q.representation_type ? q.representation_type.charAt(0).toUpperCase() + q.representation_type.slice(1) : DASH}</td>
+      <td class="mono">${q.max_edge ?? DASH}</td>
+      <td class="mono">${yncell(q.is_acyclic)}</td>
+      <td class="mono">${yncell(q.is_connected)}</td>
+      <td class="mono">${yncell(q.is_bipartite)}</td>
+      <td>
+        <span class="badge ${q.is_open ? 'badge-open' : 'badge-closed'}">
+          ${q.is_open ? 'Open' : 'Finite'}
+        </span>
+      </td>
+      <td class="mono">${q.class_size ?? '<span style="color:var(--rule)">∞</span>'}</td>
+      <td><a href="/class.html?id=${encodeURIComponent(q.mc_id)}">${q.mc_id}</a></td>
+      <td class="mono">${q.exchange_matrix ? q.exchange_matrix.flat().join(', ') : DASH}</td>
+    </tr>
+  `).join('');
+
+  const totalPages = Math.ceil(totalCount / PAGE_SIZE);
+  document.getElementById('stats-row').style.display = 'flex';
+  document.getElementById('stat-showing').textContent = totalCount.toLocaleString();
+  document.getElementById('stat-page').textContent = currentPage;
+  document.getElementById('stat-pages').textContent = totalPages;
+
+  renderPagination(totalPages);
+}
+
+function renderPagination(totalPages) {
+  const el = document.getElementById('pagination');
+  if (totalPages <= 1) { el.innerHTML = ''; return; }
+
+  const pages = [];
+  pages.push(`<button class="page-btn" onclick="goPage(${currentPage-1})" ${currentPage===1?'disabled':''}>←</button>`);
+
+  const range = [];
+  for (let p = 1; p <= totalPages; p++) {
+    if (p === 1 || p === totalPages || Math.abs(p - currentPage) <= 2) range.push(p);
+    else if (range[range.length-1] !== '…') range.push('…');
+  }
+  range.forEach(p => {
+    if (p === '…') pages.push(`<span class="page-info">…</span>`);
+    else pages.push(`<button class="page-btn ${p===currentPage?'active':''}" onclick="goPage(${p})">${p}</button>`);
+  });
+  pages.push(`<button class="page-btn" onclick="goPage(${currentPage+1})" ${currentPage===totalPages?'disabled':''}>→</button>`);
+  el.innerHTML = pages.join('');
+}
+
+async function goPage(p) {
+  const totalPages = Math.ceil(totalCount / PAGE_SIZE);
+  if (p < 1 || p > totalPages) return;
+  currentPage = p;
+  const data = await fetchQuivers(currentPage);
+  renderTable(data);
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function openDownload() {
+  QMDDownload.open(filters, { distinct: distinctTotal, labelings: labeledTotal }, scope);
+}
+
+function setScope(s) {
+  if (scope === s) return;
+  scope = s;
+  document.getElementById('btn-distinct').classList.toggle('active', s === 'distinct');
+  document.getElementById('btn-labeled').classList.toggle('active', s === 'labelings');
+  currentPage = 1;
+  goPage(1);
+}
+
+function applyFilters() {
+  filters = {};
+  const rank = document.getElementById('filter-rank').value;
+  const connected = document.getElementById('filter-connected').value;
+  const open = document.getElementById('filter-open').value;
+  const dynkin = document.getElementById('filter-dynkin').value.trim();
+  if (rank)      filters.rank = rank;
+  if (connected) filters.is_connected = connected;
+  if (open)      filters.is_open = open;
+  if (dynkin)    filters.dynkin_type = dynkin;
+  currentPage = 1;
+  goPage(1);
+}
+
+function resetFilters() {
+  document.getElementById('filter-rank').value = '';
+  document.getElementById('filter-connected').value = '';
+  document.getElementById('filter-open').value = '';
+  document.getElementById('filter-dynkin').value = '';
+  filters = {};
+  currentPage = 1;
+  goPage(1);
+}
+
+// Sort on column header click
+document.querySelectorAll('th[data-col]').forEach(th => {
+  th.addEventListener('click', (e) => {
+    if (e.target.closest('.col-info')) return;   // wiki link, not a sort
+    const col = th.dataset.col;
+    if (sortCol === col) sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+    else { sortCol = col; sortDir = 'asc'; }
+    document.querySelectorAll('th').forEach(t => t.classList.remove('sorted'));
+    th.classList.add('sorted');
+    th.querySelector('.sort-arrow').textContent = sortDir === 'asc' ? '↑' : '↓';
+    currentPage = 1;
+    goPage(1);
+  });
+});
+
+// Initial load
+(async () => {
+  const data = await fetchQuivers(1);
+  renderTable(data);
+})();
+</script>
+<footer>
+  <span>Quiver Mutation Database (QMD)</span>
+  <span><a href="/acknowledge.html">Acknowledge</a> &middot; <a href="mailto:jackson@icarm.io">jackson@icarm.io</a></span>
+</footer>
+
+</body>
+</html>

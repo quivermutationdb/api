@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Quiver — QMD</title>
+  <!-- Google tag (gtag.js) -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-J4QG6T5TE5"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+    gtag('config', 'G-J4QG6T5TE5');
+  </script>
+
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+<a class="skip-link" href="#page-content">Skip to main content</a>
+
+<nav>
+  <a href="/" class="brand">QMD</a>
+  <a href="/">Home</a>
+  <a href="/about.html">About</a>
+  <a href="/browse.html" class="active">Browse</a>
+  <a href="/search.html">Search</a>
+  <a href="/roadmap.html">Roadmap</a>
+  <a href="/wiki.html">Wiki</a>
+  <div class="spacer"></div>
+  <span class="status" id="api-status">connecting…</span>
+</nav>
+
+<main class="page" id="page-content">
+  <div class="state-msg"><div class="spinner"></div>Loading quiver…</div>
+</main>
+
+<script src="/quiver-draw.js"></script>
+<script>
+const API = '/api';
+const qid = new URLSearchParams(location.search).get('id');
+
+function renderMatrix(matrix) {
+  const n = matrix.length;
+  const grid = document.createElement('div');
+  grid.className = 'matrix-grid';
+  grid.style.gridTemplateColumns = `repeat(${n}, auto)`;
+  matrix.forEach(row => row.forEach(val => {
+    const cell = document.createElement('div');
+    cell.className = 'matrix-cell ' + (val > 0 ? 'pos' : val < 0 ? 'neg' : 'zero');
+    cell.textContent = val;
+    grid.appendChild(cell);
+  }));
+  const wrap = document.createElement('div');
+  wrap.className = 'matrix-container';
+  const lb = document.createElement('span'); lb.className = 'matrix-bracket left';
+  const rb = document.createElement('span'); rb.className = 'matrix-bracket right';
+  wrap.appendChild(lb); wrap.appendChild(grid); wrap.appendChild(rb);
+  return wrap;
+}
+
+function renderPage(q) {
+  document.title = `${q.qmd_id} — QMD`;
+  const n = q.exchange_matrix.length;
+  const isOpen = q.is_open;
+  const dynkin = q.dynkin_type ?? '—';
+  const yn = v => v === true ? 'Yes' : v === false ? 'No'
+    : '<span style="color:var(--ink-light)">Unknown</span>';
+  const rep = q.representation_type
+    ? q.representation_type.charAt(0).toUpperCase() + q.representation_type.slice(1)
+    : '—';
+  const sym = q.symmetry_group
+    ? `${q.symmetry_group.name} <span style="color:var(--ink-light)">(order ${q.symmetry_group.order})</span>`
+    : '—';
+
+  const content = document.getElementById('page-content');
+  content.innerHTML = `
+    <div class="breadcrumb">
+      <a href="/browse.html">Browse</a>
+      <span>/</span>
+      <span>${q.qmd_id}</span>
+    </div>
+
+    <div class="title-block">
+      <div class="qid">${q.qmd_id}</div>
+      <h1>${q.label ?? ('Rank-' + n + ' Quiver')}</h1>
+      <span class="badge ${isOpen ? 'badge-open' : 'badge-closed'}">
+        ${isOpen ? 'Open class' : 'Finite type'}
+      </span>
+    </div>
+
+    <div class="two-col">
+      <div class="section" id="quiver-section">
+        <div class="section-label">Quiver</div>
+      </div>
+      <div class="section">
+        <div class="section-label">Properties</div>
+        <div class="meta-list">
+          <div class="meta-row"><span class="key"><a class="def-link" href="/wiki.html#rank">Rank</a></span><span class="val">${n}</span></div>
+          <div class="meta-row"><span class="key"><a class="def-link" href="/wiki.html#dynkin-type">Dynkin type</a></span><span class="val">${dynkin}</span></div>
+          <div class="meta-row"><span class="key"><a class="def-link" href="/wiki.html#representation-type">Representation type</a></span><span class="val">${rep}</span></div>
+          <div class="meta-row"><span class="key"><a class="def-link" href="/wiki.html#acyclic">Acyclic</a></span><span class="val">${yn(q.is_acyclic)}</span></div>
+          <div class="meta-row"><span class="key"><a class="def-link" href="/wiki.html#connected">Connected</a></span><span class="val">${yn(q.is_connected)}</span></div>
+          <div class="meta-row"><span class="key"><a class="def-link" href="/wiki.html#bipartite">Bipartite</a></span><span class="val">${yn(q.is_bipartite)}</span></div>
+          <div class="meta-row"><span class="key"><a class="def-link" href="/wiki.html#abundant">Abundant</a></span><span class="val">${yn(q.is_abundant)}</span></div>
+          <div class="meta-row"><span class="key"><a class="def-link" href="/wiki.html#planar">Planar</a></span><span class="val">${yn(q.is_planar)}</span></div>
+          <div class="meta-row"><span class="key"><a class="def-link" href="/wiki.html#max-edge">Max edge weight</a></span><span class="val">${q.max_edge ?? '—'}</span></div>
+          <div class="meta-row"><span class="key"><a class="def-link" href="/wiki.html#symmetry-group">Symmetry group</a></span><span class="val">${sym}</span></div>
+          <div class="meta-row">
+            <span class="key"><a class="def-link" href="/wiki.html#mutation-class">Mutation class</a></span>
+            <span class="val">
+              <a href="/class.html?id=${encodeURIComponent(q.mc_id)}">${q.mc_id}</a>
+            </span>
+          </div>
+          <div class="meta-row"><span class="key"><a class="def-link" href="/wiki.html#mutation-class-size">Mutation class size</a></span><span class="val">${q.class_size ?? (isOpen ? '∞' : '—')}</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section section-full">
+      <div class="section-label">Tags</div>
+      <div class="tags" id="tags-container">
+        ${(q.tags ?? []).length === 0
+          ? '<span style="color:var(--ink-light);font-style:italic;font-size:0.88rem">No tags</span>'
+          : (q.tags ?? []).map(t => `<span class="tag">${t}</span>`).join('')}
+      </div>
+    </div>
+
+    <div class="section section-full">
+      <div class="section-label">
+        Other labeled quivers in this mutation class
+        ${q.class_size ? `<span style="font-weight:400;opacity:0.6"> — ${q.class_size} total</span>` : ''}
+      </div>
+      <div id="class-members-container">
+        <div class="state-msg" style="padding:2rem">
+          <div class="spinner"></div>Loading class members…
+        </div>
+      </div>
+    </div>
+  `;
+
+  // Draw the quiver; keep the exchange matrix available in a collapsible
+  const quiverSection = document.getElementById('quiver-section');
+  const fig = document.createElement('div');
+  fig.className = 'quiver-figure';
+  fig.appendChild(renderQuiver(q.exchange_matrix));
+  quiverSection.appendChild(fig);
+
+  const details = document.createElement('details');
+  details.className = 'matrix-details';
+  const summary = document.createElement('summary');
+  summary.textContent = 'Exchange matrix';
+  details.appendChild(summary);
+  details.appendChild(renderMatrix(q.exchange_matrix));
+  quiverSection.appendChild(details);
+
+  // Load class members
+  fetchClassMembers(q.mc_id, q.qmd_id);
+}
+
+async function fetchClassMembers(mcId, currentQid) {
+  try {
+    const res = await fetch(`${API}/classes/${encodeURIComponent(mcId)}`);
+    if (!res.ok) throw new Error();
+    const data = await res.json();
+    renderClassMembers(data.labeled_quivers, currentQid, data.canonical_qid);
+  } catch {
+    // Demo: show a few synthetic rows
+    const rows = Array.from({length: 6}, (_, i) => ({
+      qmd_id: i === 0 ? currentQid : `Q.n3.${(0xabc123 + i * 0x1f).toString(16).padEnd(16,'0')}`,
+      is_canonical: i === 2,
+    }));
+    renderClassMembers(rows, currentQid, rows[2].qmd_id);
+  }
+}
+
+function renderClassMembers(members, currentQid, canonicalQid) {
+  const container = document.getElementById('class-members-container');
+  if (!members || members.length === 0) {
+    container.innerHTML = '<p style="padding:1rem;color:var(--ink-light);font-style:italic">No members found.</p>';
+    return;
+  }
+  const rows = members.map(m => {
+    const isCurrent = m.qmd_id === currentQid;
+    const isCanon = m.qmd_id === canonicalQid;
+    return `<tr class="${isCanon ? 'is-canon' : ''}">
+      <td>${isCurrent
+        ? `<span style="font-family:var(--mono);font-size:0.72rem">${m.qmd_id} <span style="color:var(--ink-light)">(current)</span></span>`
+        : `<a href="/quiver.html?id=${encodeURIComponent(m.qmd_id)}">${m.qmd_id}</a>`}
+      </td>
+      <td class="mono">${isCanon ? '★ canonical rep' : ''}</td>
+    </tr>`;
+  }).join('');
+  container.innerHTML = `
+    <table class="members-table">
+      <thead><tr><th>Quiver ID</th><th>Notes</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    ${members.length > 10 ? `<p style="padding:0.75rem;font-family:var(--mono);font-size:0.72rem;color:var(--ink-light)">Showing all ${members.length} labeled matrices.</p>` : ''}
+  `;
+}
+
+async function fetchQuiver(id) {
+  try {
+    const res = await fetch(`${API}/quivers/${encodeURIComponent(id)}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    document.getElementById('api-status').textContent = 'connected';
+    return await res.json();
+  } catch {
+    document.getElementById('api-status').textContent = 'demo mode';
+    // Demo quiver
+    return {
+      qmd_id: id,
+      label: 'A3',
+      num_vertices: 3,
+      exchange_matrix: [[0,1,0],[-1,0,1],[0,-1,0]],
+      dynkin_type: 'A3',
+      is_finite_type: true,
+      is_open: false,
+      is_acyclic: true,
+      is_connected: true,
+      is_bipartite: true,
+      is_abundant: false,
+      is_planar: true,
+      representation_type: 'finite',
+      symmetry_group: { order: 2, name: 'Z/2', generators: [[2,1,0]] },
+      max_edge: 1,
+      class_size: 14,
+      mc_id: 'MC.n3.8b4942ccbfd5b5aa',
+      tags: ['acyclic', 'simply-laced', 'cluster-finite'],
+    };
+  }
+}
+
+if (!qid) {
+  document.getElementById('page-content').innerHTML =
+    '<div class="state-msg">No quiver ID specified. <a href="/browse.html" style="color:var(--accent)">Browse all quivers →</a></div>';
+} else {
+  fetchQuiver(qid).then(renderPage);
+}
+</script>
+<footer>
+  <span>Quiver Mutation Database (QMD)</span>
+  <span><a href="/acknowledge.html">Acknowledge</a> &middot; <a href="mailto:jackson@icarm.io">jackson@icarm.io</a></span>
+</footer>
+
+</body>
+</html>

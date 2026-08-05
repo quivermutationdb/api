@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>About — QMD</title>
+
+  <!-- Google tag (gtag.js) -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-J4QG6T5TE5"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+    gtag('config', 'G-J4QG6T5TE5');
+  </script>
+
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to main content</a>
+
+<nav>
+  <a href="/" class="brand">QMD</a>
+  <a href="/">Home</a>
+  <a href="/about.html" class="active">About</a>
+  <a href="/browse.html">Browse</a>
+  <a href="/search.html">Search</a>
+  <a href="/roadmap.html">Roadmap</a>
+  <a href="/wiki.html">Wiki</a>
+</nav>
+
+<main class="page" id="main">
+
+  <h1>About the Quiver Mutation Database</h1>
+
+  <p>
+    The <strong>Quiver Mutation Database (QMD)</strong> is an open research
+    infrastructure for quivers, exchange matrices, and mutation-equivalence
+    classes arising in cluster algebras, representation theory, and related
+    areas of algebra and geometry.
+  </p>
+
+  <p>
+    Quiver mutation is a central operation in modern algebraic combinatorics,
+    but its combinatorial complexity grows rapidly. Even for modest numbers
+    of vertices, mutation-equivalence classes can be large, infinite, or
+    difficult to explore systematically. As a result, much of the existing
+    knowledge about mutation classes, invariants, and exceptional phenomena
+    is scattered across papers, personal code, and ad hoc datasets.
+  </p>
+
+  <p>
+    QMD is designed to address this gap by providing a curated, citable, and
+    reproducible database of quivers and mutation classes, together with
+    rigorously defined invariants and transparent computational provenance.
+    The project is inspired by successful community resources such as the
+    <a href="https://www.lmfdb.org/">L-functions and Modular Forms Database (LMFDB)</a>
+    and <a href="https://houseofgraphs.org/">House of Graphs</a>,
+    and aims to bring similar infrastructure principles to the study of quiver mutation.
+  </p>
+
+  <h2>Design principles</h2>
+
+  <p><strong>FAIR: Findable, Accessible, Interoperable, Reusable</strong><br />
+  QMD is designed in accordance with the
+  <a href="https://www.nature.com/articles/sdata201618">FAIR Data Principles</a>.
+  A database that is not findable, accessible to non-experts, integratable with existing
+  mathematical infrastructure, or reusable is of little use to the mathematical community.
+  </p>
+
+  <p><strong>Stable identifiers</strong><br />
+  Each quiver is assigned a permanent identifier determined by a canonical
+  representative up to relabeling. Mutation-equivalence classes are
+  likewise identified by canonical representatives, with clear documentation
+  of exploration limits when full enumeration is not possible.
+  </p>
+
+  <p><strong>Reproducibility and provenance</strong><br />
+  All computed data are accompanied by metadata describing how the values
+  were obtained, including algorithmic assumptions, software versions,
+  and references where applicable.
+  </p>
+
+  <p><strong>Forward-facing with room to grow</strong><br />
+  New invariants, frozen vertices, and skew-symmetrizable matrices are
+  objects of interest that will be included. The database is built so that
+  future expansion is a core design principle, not an afterthought.
+  </p>
+
+  <p><strong>Accessibility to a mathematical audience</strong><br />
+  The data should be easily filterable, searchable, viewable, and downloadable.
+  The goal of the database is to promote data-driven research in the mathematical
+  community, and that starts with a low-barrier-to-entry public-facing interface.
+  </p>
+
+  <h2>Data and provenance</h2>
+
+  <p>
+    QMD's current corpus is <strong>generated exhaustively, not imported</strong>:
+    it is produced by a single reproducible pipeline rather than assembled from
+    external files. As the database grows, curated objects from the literature and
+    from systems such as <a href="https://www.sagemath.org/">SageMath</a> will be
+    incorporated, with their origin recorded alongside them.
+  </p>
+
+  <p><strong>What is included</strong><br />
+  The present release covers skew-symmetric integer quivers on
+  <strong>1&ndash;4 vertices</strong> whose exchange-matrix entries are bounded by
+  <strong>|b<sub>ij</sub>|&nbsp;&le;&nbsp;2</strong>
+  (the <a href="/wiki.html#max-edge">maximum edge weight</a>).
+  </p>
+
+  <p><strong>How it is built</strong><br />
+  The pipeline runs three deterministic steps:
+  </p>
+  <ol>
+    <li><strong>Seed enumeration.</strong> For each rank up to four, every
+    skew-symmetric matrix with entries in {&minus;2,&nbsp;&hellip;,&nbsp;2} is
+    enumerated, and one canonical representative is kept per quiver isomorphism
+    class &mdash; the lexicographically minimal matrix over all vertex
+    relabelings.</li>
+    <li><strong>Mutation exploration.</strong> From each seed, the mutation class
+    is explored by breadth-first search, applying quiver mutation until the class
+    closes up or a mutation would push an entry past the bound.</li>
+    <li><strong>Class assembly and identifiers.</strong> Orbits that share a
+    common quiver are merged into a single mutation class, and every quiver and
+    class is given a permanent identifier derived from a SHA-256 hash of its
+    canonical form.</li>
+  </ol>
+
+  <p><strong>Assumptions and limits</strong><br />
+  These bounds matter when interpreting the data:
+  </p>
+  <ul>
+    <li><strong>Edge-weight bound.</strong> Enumeration and mutation are both
+    capped at |b<sub>ij</sub>|&nbsp;&le;&nbsp;2. A class is recorded as
+    <strong>open</strong> when a mutation would exceed this bound, so
+    &ldquo;open&rdquo; means the class escapes the current exploration window
+    &mdash; this includes genuinely
+    <a href="/wiki.html#mutation-finite">mutation-infinite</a> classes as well as
+    any that would only be captured at a higher bound. Classes marked
+    <strong>finite type</strong> were fully enumerated within the bound and are
+    complete.</li>
+    <li><strong>Matrix type.</strong> Only skew-symmetric integer matrices are
+    included. Skew-symmetrizable matrices and frozen vertices are planned but not
+    yet present.</li>
+    <li><strong>Rank.</strong> Only ranks 1&ndash;4 are currently generated;
+    higher ranks are planned (see the <a href="/roadmap.html">Roadmap</a>).</li>
+    <li><strong>Reproducibility.</strong> The pipeline is deterministic: canonical
+    forms and identifiers depend only on the matrices themselves, so re-running it
+    reproduces the same database exactly.</li>
+  </ul>
+
+  <p>
+    This follows QMD's soundness-first principle: every recorded value is either
+    fully computed within stated bounds or explicitly flagged as partial.
+  </p>
+
+  <h2>Contact and contributions</h2>
+
+  <p>
+    QMD is intended as a community resource. Suggestions, corrections, and
+    expressions of interest are welcome.
+  </p>
+
+  <p>
+    <strong>Blake Jackson</strong><br />
+    ICARM, Carnegie Mellon University<br />
+    <a href="mailto:jackson@icarm.io">jackson@icarm.io</a>
+  </p>
+
+</main>
+
+<footer>
+  <span>Quiver Mutation Database (QMD)</span>
+  <span><a href="/acknowledge.html">Acknowledge</a> &middot; <a href="mailto:jackson@icarm.io">jackson@icarm.io</a></span>
+</footer>
+
+</body>
+</html>

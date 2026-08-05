@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Roadmap — QMD</title>
+
+  <!-- Google tag (gtag.js) -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-J4QG6T5TE5"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+    gtag('config', 'G-J4QG6T5TE5');
+  </script>
+
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to main content</a>
+
+<nav>
+  <a href="/" class="brand">QMD</a>
+  <a href="/">Home</a>
+  <a href="/about.html">About</a>
+  <a href="/browse.html">Browse</a>
+  <a href="/search.html">Search</a>
+  <a href="/roadmap.html" class="active">Roadmap</a>
+  <a href="/wiki.html">Wiki</a>
+</nav>
+
+<main class="page" id="main">
+
+  <h1>Project Roadmap</h1>
+
+  <p>
+    The development of the <strong>Quiver Mutation Database (QMD)</strong> is
+    organized in phases, with an emphasis on correctness, stability, and
+    community usability at each stage.
+  </p>
+
+  <h2>Phase 0 — Project foundation <span class="badge badge-closed" style="vertical-align:middle;margin-left:0.5rem">Complete</span></h2>
+
+  <ul>
+    <li>Establishment of the website</li>
+    <li>Definition of project scope and guiding principles</li>
+    <li>Design of canonical representations and identifier schemes</li>
+    <li>Assessment of existing datasets and software resources suitable for inclusion</li>
+  </ul>
+
+  <p>
+    This phase focuses on laying a stable conceptual and organizational foundation
+    before large-scale data ingestion or software development.
+  </p>
+
+  <h2>Phase 1 — Core dataset and identifiers <span class="badge badge-dev" style="vertical-align:middle;margin-left:0.5rem">Current</span></h2>
+
+  <h3>Goals</h3>
+  <ul>
+    <li>Define a canonical representation for quivers up to relabeling</li>
+    <li>Assign stable, permanent identifiers to quivers and mutation classes</li>
+    <li>Assemble an initial corpus of quivers from curated sources (e.g., literature, SageMath databases)</li>
+    <li>Record basic invariants and metadata for each object</li>
+    <li>Set up a wiki for definitions of objects, invariants, and other statistics</li>
+  </ul>
+
+  <h3>Deliverables</h3>
+  <ul>
+    <li>A publicly browsable list of quivers and mutation classes</li>
+    <li>Downloadable datasets in standard formats (e.g., CSV, JSON)</li>
+    <li>Clear documentation of data sources and assumptions</li>
+  </ul>
+
+  <h2>Phase 2 — Search, filtering, and exploration metadata</h2>
+
+  <h3>Goals</h3>
+  <ul>
+    <li>Enable search and filtering by basic invariants (e.g., number of vertices, acyclicity, known mutation-finite status)</li>
+    <li>Record exploration bounds for mutation classes, including partial or truncated computations</li>
+    <li>Provide mutation-neighborhood navigation for selected classes</li>
+  </ul>
+
+  <h3>Deliverables</h3>
+  <ul>
+    <li>Interactive browse and search interface</li>
+    <li>Class pages documenting known members and exploration limits</li>
+    <li>Explicit distinction between fully enumerated and partially explored data</li>
+  </ul>
+
+  <h2>Phase 3 — Computed invariants and reproducible code</h2>
+
+  <h3>Goals</h3>
+  <ul>
+    <li>Expand the collection of computed invariants associated with quivers and mutation classes</li>
+    <li>Provide reproducible Python/SageMath or C++ code snippets illustrating definitions and computations</li>
+    <li>Track computational provenance and versioning</li>
+  </ul>
+
+  <h3>Deliverables</h3>
+  <ul>
+    <li>Expanded list of invariants with references and domain restrictions</li>
+    <li>Reproducible code examples embedded in object pages</li>
+    <li>Versioned datasets supporting reproducible research</li>
+  </ul>
+
+  <h2>Phase 4 — Community contributions and sustainability</h2>
+
+  <h3>Goals</h3>
+  <ul>
+    <li>Define workflows for submitting new data and proposed invariants</li>
+    <li>Establish review and curation procedures</li>
+    <li>Support community contributions while maintaining data quality</li>
+  </ul>
+
+  <h3>Deliverables</h3>
+  <ul>
+    <li>Submission and review guidelines</li>
+    <li>Contribution documentation</li>
+    <li>Long-term maintenance and governance plan</li>
+  </ul>
+
+  <h2>Long-term vision</h2>
+
+  <p>
+    The long-term goal of QMD is to serve as a stable reference and experimental platform
+    for research involving quiver mutation, supporting conjecture formation, verification,
+    counterexample hunting, and general discovery across multiple areas of mathematics.
+  </p>
+
+  <p>
+    Development priorities will be guided by community feedback and practical usage,
+    with an emphasis on correctness, transparency, and long-term sustainability.
+  </p>
+
+</main>
+
+<footer>
+  <span>Quiver Mutation Database (QMD)</span>
+  <span><a href="/acknowledge.html">Acknowledge</a> &middot; <a href="mailto:jackson@icarm.io">jackson@icarm.io</a></span>
+</footer>
+
+</body>
+</html>

@@ -19,6 +19,7 @@
     "hono": "^4.13.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "drizzle-kit": "^0.31.10",
     "typescript": "^7.0.2",
     "wrangler": "^4.118.0"
