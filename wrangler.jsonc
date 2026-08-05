@@ -8,6 +8,14 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-08-01",
 
+  // Production hostnames (Custom Domains on the quivermutationdb.org zone).
+  // Declared here so the repo fully describes the deployment; the dashboard
+  // attachment was made first and deploys keep it in sync.
+  "routes": [
+    { "pattern": "quivermutationdb.org", "custom_domain": true },
+    { "pattern": "www.quivermutationdb.org", "custom_domain": true }
+  ],
+
   // Static frontend (folded in from the `website` repo in migration step 5;
   // until then `public/` holds a placeholder page).
   "assets": {
