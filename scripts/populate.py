@@ -4,9 +4,9 @@ scripts/populate.py
 Generate the dataset and export it as per-rank SQL files for Cloudflare D1.
 
 Runs the full generation pipeline (qmd/core.py) and writes one
-self-contained SQL file per rank (DIR/qmd-n{k}.sql) for
+per-rank set of SQL parts (DIR/qmd-n{k}.NNN.sql) for
 
-    npx wrangler d1 execute qmd --remote --file=DIR/qmd-n{k}.sql
+    scripts/import-d1.sh DIR [--remote]        # parts in order, ranks ascending
 
 plus a manifest and per-rank checkpoints so an interrupted run resumes
 where it left off (see qmd/d1_export.py). Pure Python, no database
@@ -40,6 +40,13 @@ def main() -> None:
     parser.add_argument("--force", action="store_true",
                         help="Regenerate ranks even if their exported file is "
                              "up to date.")
+    parser.add_argument("--node-cap", type=int, default=None,
+                        help="Stop a class BFS after this many labeled matrices; "
+                             "such classes are stored as exploration='truncated' "
+                             "with unknown finiteness (never as finite).")
+    parser.add_argument("--part-bytes", type=int, default=None,
+                        help="Split each rank's SQL into parts of at most this "
+                             "many bytes (default 64 MB).")
     args = parser.parse_args()
 
     from qmd.d1_export import export_ranks
@@ -47,8 +54,12 @@ def main() -> None:
     print(f"Exporting D1 SQL to {args.export_d1} "
           f"(ranks {ranks or f'1..{args.max_vertices}'}, "
           f"bound |b_ij| <= {args.bound}) ...")
+    kwargs = {}
+    if args.part_bytes:
+        kwargs["part_bytes"] = args.part_bytes
     export_ranks(args.export_d1, max_vertices=args.max_vertices,
-                 bound=args.bound, ranks=ranks, force=args.force)
+                 bound=args.bound, ranks=ranks, force=args.force,
+                 node_cap=args.node_cap, **kwargs)
     print("Done.")
 
 

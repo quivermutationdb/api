@@ -1123,3 +1123,12 @@ nav a { display: inline-flex; align-items: center; align-self: stretch; }
     scroll-behavior: auto !important;
   }
 }
+
+/* --- phase 2: nicknames, disabled sort, load-more ------------------------ */
+.nick { font-family: var(--serif); font-weight: 600; color: var(--accent); margin-left: 0.35rem; }
+.nick-note { color: var(--ink-light); max-width: 65ch; margin: 0.25rem 0 0; }
+th.sort-disabled { pointer-events: none; }
+th.sort-disabled .sort-arrow { opacity: 0.25; }
+.load-more { display: flex; justify-content: center; padding: 0.75rem; gap: 1rem; align-items: center;
+  font-family: var(--mono); font-size: 0.78rem; color: var(--ink-light); }
+.badge-truncated { background: var(--accent-soft); color: var(--accent); border: 1px solid var(--rule-strong); }

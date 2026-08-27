@@ -9,10 +9,14 @@
 
 import { Hono } from "hono";
 import { api } from "./api";
+import { mcpHandler } from "./mcp";
 
 const app = new Hono<{ Bindings: Env }>();
 
 app.route("/api", api);
+
+// Model Context Protocol endpoint for agents (stateless Streamable HTTP).
+app.all("/mcp", (c) => mcpHandler(c.env)(c.req.raw, c.env, c.executionCtx as unknown as ExecutionContext));
 
 // /api/* is routed to the Worker ahead of assets; anything unmatched here is
 // an unknown API path, not a page. Pages are served directly from assets.

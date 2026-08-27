@@ -37,7 +37,11 @@
 <script src="/quiver-draw.js"></script>
 <script>
 const API = '/api';
-const mcId = new URLSearchParams(location.search).get('id');
+const urlParams = new URLSearchParams(location.search);
+const mcId = urlParams.get('id');
+const slug = urlParams.get('name');
+const esc = s => String(s).replace(/[&<>"']/g,
+  ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
 let membersMode = 'distinct';   // 'distinct' | 'all'
 let layoutMode = 'table';       // 'table' | 'grid'
 
@@ -77,24 +81,14 @@ function renderMatrix(matrix) {
   return wrap;
 }
 
-// Collapse the labeled orbit into one entry per distinct unlabeled quiver.
-// Fallback if the API ever omits distinct_quivers.
-function deriveDistinct(labeled, canonId) {
-  const map = new Map();
-  labeled.forEach(m => {
-    let g = map.get(m.qmd_id);
-    if (!g) {
-      g = { qmd_id: m.qmd_id, matrix: m.matrix,
-            labeling_count: 0, is_canonical: m.qmd_id === canonId };
-      map.set(m.qmd_id, g);
-    }
-    g.labeling_count++;
-  });
-  return [...map.values()].sort((a, b) =>
-    (b.is_canonical - a.is_canonical)
-    || (b.labeling_count - a.labeling_count)
-    || a.qmd_id.localeCompare(b.qmd_id));
-}
+// Members are paged through /classes/{id}/quivers (distinct) and
+// /classes/{id}/labelings (all labeled matrices); the class detail supplies
+// the first distinct page, and small classes' labelings inline.
+const members = {
+  distinct: { items: [], next: null, total: 0, endpoint: 'quivers' },
+  all:      { items: [], next: null, total: 0, endpoint: 'labelings', loaded: false },
+};
+const PAGE_LIMIT = 100;
 
 // Canonical test depends on the active view:
 //   distinct    -> the one quiver flagged is_canonical
@@ -105,7 +99,28 @@ function isCanonical(m) {
 }
 
 function currentList() {
-  return membersMode === 'distinct' ? window._distinct : window._labeled;
+  return members[membersMode === 'distinct' ? 'distinct' : 'all'].items;
+}
+
+async function loadMoreMembers() {
+  const st = members[membersMode === 'distinct' ? 'distinct' : 'all'];
+  if (st.loaded === false && st.items.length === 0) st.next = st.next ?? '';   // first labelings page
+  if (st.next === null) return;
+  const btn = document.getElementById('members-more');
+  if (btn) btn.disabled = true;
+  try {
+    const cur = st.next ? `?limit=${PAGE_LIMIT}&cursor=${encodeURIComponent(st.next)}` : `?limit=${PAGE_LIMIT}`;
+    const res = await fetch(`${API}/classes/${encodeURIComponent(window._mcId)}/${st.endpoint}${cur}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const page = await res.json();
+    st.items = st.items.concat(page.items);
+    st.next = page.next_cursor;
+    st.loaded = true;
+    renderMembers();
+  } catch (e) {
+    console.error(e);
+    if (btn) { btn.disabled = false; btn.textContent = 'Retry'; }
+  }
 }
 
 function renderMemberTable(list) {
@@ -160,14 +175,25 @@ function renderMemberGrid(list) {
 
 function renderMembers() {
   const container = document.getElementById('orbit-container');
-  const list = currentList();
-  if (!list) return;
+  const st = members[membersMode === 'distinct' ? 'distinct' : 'all'];
+  if (membersMode === 'all' && !st.loaded) {
+    container.innerHTML = '<div class="state-msg" style="padding:2rem"><div class="spinner"></div>Loading labelings…</div>';
+    loadMoreMembers();
+    return;
+  }
+  const list = st.items;
   if (layoutMode === 'table') {
     container.innerHTML = renderMemberTable(list);
   } else {
     container.innerHTML = '';
     container.appendChild(renderMemberGrid(list));
   }
+  const noun = membersMode === 'distinct' ? 'distinct quivers' : 'labeled matrices';
+  const footer = document.createElement('div');
+  footer.className = 'load-more';
+  footer.innerHTML = `<span>${list.length === st.total ? `${st.total} ${noun}` : `Showing ${list.length} of ${st.total} ${noun}`}</span>`
+    + (st.next ? '<button type="button" class="btn btn-ghost" id="members-more" onclick="loadMoreMembers()">Load more</button>' : '');
+  container.appendChild(footer);
 }
 
 function setMode(mode) {
@@ -203,11 +229,13 @@ function renderPage(mc) {
 
     <div class="title-block">
       <div class="qid">${mc.mc_id}</div>
-      <h1>${mc.label ?? ('Rank-' + n + ' Mutation Class')}</h1>
+      <h1>${mc.nickname ? esc(mc.nickname) : (mc.label ?? ('Rank-' + n + ' Mutation Class'))}</h1>
+      ${mc.nickname && mc.label ? `<div class="nick-note">${mc.label} — <a class="def-link" href="/wiki.html#nicknames">nickname</a> <code>${esc(mc.nickname_slug)}</code></div>` : ''}
+      ${mc.nickname_note ? `<p class="nick-note">${esc(mc.nickname_note)}</p>` : ''}
       <div class="title-meta">
-        <span class="badge ${isOpen ? 'badge-open' : 'badge-closed'}">
-          ${isOpen ? 'Open' : 'Finite type'}
-        </span>
+        ${mc.exploration === 'truncated'
+          ? '<span class="badge badge-truncated" title="The search stopped at the node cap; finiteness is unknown">Truncated</span>'
+          : `<span class="badge ${isOpen ? 'badge-open' : 'badge-closed'}">${isOpen ? 'Open' : 'Finite type'}</span>`}
         <span class="stat-pill">Labeled orbit: <b>${mc.labeled_size}</b> matrices</span>
         <span class="stat-pill">Distinct quivers: <b>${mc.distinct_quiver_count}</b></span>
         ${mc.merged_orbit_count > 1 ? `<span class="stat-pill">Merged from <b>${mc.merged_orbit_count}</b> BFS orbits</span>` : ''}
@@ -251,7 +279,7 @@ function renderPage(mc) {
     <div class="orbit-section">
       <div class="orbit-header">
         <div class="section-label" style="margin-bottom:0;border:none;padding:0">
-          Members — ${mc.distinct_quivers ? mc.distinct_quivers.length : mc.distinct_quiver_count} distinct quivers · ${mc.labeled_size} labeled matrices
+          Members — ${mc.distinct_quiver_count} distinct quivers · ${mc.labeled_size} labeled matrices${mc.exploration !== 'complete' ? ' explored' : ''}
         </div>
         <div style="display:flex;gap:1rem;flex-wrap:wrap">
           <div class="orbit-controls" role="group" aria-label="Member set">
@@ -285,20 +313,23 @@ function renderPage(mc) {
   details.appendChild(renderMatrix(mc.canonical_matrix));
   canonSection.appendChild(details);
 
-  // Store both member lists for view switching, then render.
-  window._labeled = mc.labeled_quivers || [];
-  window._distinct = (mc.distinct_quivers && mc.distinct_quivers.length)
-    ? mc.distinct_quivers
-    : deriveDistinct(window._labeled, mc.canonical_qid);
+  // Seed the paged member lists from the detail, then render.
+  window._mcId = mc.mc_id;
   window._canonId = mc.canonical_qid;
   window._canonKey = JSON.stringify(mc.canonical_matrix);
+  members.distinct = { items: mc.distinct_quivers || [], next: mc.distinct_quivers_next_cursor || null,
+                       total: mc.distinct_quiver_count, endpoint: 'quivers', loaded: true };
+  const inline = !mc.labeled_quivers_truncated && Array.isArray(mc.labeled_quivers);
+  members.all = { items: inline ? mc.labeled_quivers : [], next: null, total: mc.labeled_size,
+                  endpoint: 'labelings', loaded: inline };
   membersMode = 'distinct';
   layoutMode = 'table';
   renderMembers();
 }
 
-async function fetchClass(id) {
-  const res = await fetch(`${API}/classes/${encodeURIComponent(id)}`);
+const fetchClass = id => fetchClassPath(encodeURIComponent(id));
+async function fetchClassPath(path) {
+  const res = await fetch(`${API}/classes/${path}`);
   if (!res.ok) {
     const err = new Error(`HTTP ${res.status}`);
     err.status = res.status;
@@ -309,14 +340,24 @@ async function fetchClass(id) {
 }
 
 const MCID_RE = /^MC\.n\d+\.[0-9a-f]{16}$/;
-const esc = s => String(s).replace(/[&<>"']/g,
-  ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
 function showMessage(html) {
   document.getElementById('page-content').innerHTML = `<div class="state-msg">${html}</div>`;
 }
 const BROWSE_LINK = '<a href="/browse.html" style="color:var(--accent)">Browse all quivers →</a>';
 
-if (!mcId) {
+const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+if (slug && !mcId) {
+  if (!SLUG_RE.test(slug)) {
+    showMessage(`<code>${esc(slug)}</code> is not a nickname. ${BROWSE_LINK}`);
+  } else {
+    fetchClassPath('by-slug/' + encodeURIComponent(slug)).then(mc => { history.replaceState(null, '', `?id=${encodeURIComponent(mc.mc_id)}`); renderPage(mc); }).catch(err => {
+      console.error(err);
+      showMessage(err.status === 404
+        ? `No class is nicknamed <code>${esc(slug)}</code>. <a href="/wiki.html#nicknames" style="color:var(--accent)">About nicknames →</a>`
+        : 'The database is temporarily unavailable. Please try again shortly.');
+    });
+  }
+} else if (!mcId) {
   showMessage(`No class ID specified. ${BROWSE_LINK}`);
 } else if (!MCID_RE.test(mcId)) {
   showMessage(`<code>${esc(mcId)}</code> is not a mutation class ID (expected <code>MC.n&lt;rank&gt;.&lt;16 hex digits&gt;</code>). ${BROWSE_LINK}`);

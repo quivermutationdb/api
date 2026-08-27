@@ -2,9 +2,15 @@
 
 Backend for the [Quiver Mutation Database](https://quivermutationdb.org).
 
-One Cloudflare Worker serves the site and the API (same origin, `/api/*`),
-backed by a D1 database. The Python math pipeline (`qmd/`) runs offline and
-exports SQL for D1. See `CLAUDE.md` for the architecture guide.
+One Cloudflare Worker serves the site, the JSON API (`/api/*`) and an MCP
+server for agents (`/mcp`), backed by a D1 database. The Python math pipeline
+(`qmd/`) runs offline and exports SQL for D1. See `CLAUDE.md` for the
+architecture guide and `docs/PHASE2.md` for the scaling design.
+
+**For agents and scripts:** [`/llms.txt`](https://quivermutationdb.org/llms.txt) ·
+[`/api/openapi.json`](https://quivermutationdb.org/api/openapi.json) ·
+MCP at `https://quivermutationdb.org/mcp` · bulk pulls via
+`/api/export.ndjson` (follow `X-Next-Cursor`). Every list returns `next_cursor`.
 
 ## Cloudflare Worker
 
@@ -13,12 +19,14 @@ frontend (Workers Static Assets from `public/`).
 
 ```
 src/
-├── index.ts         # Worker entry point (Hono app + assets fallthrough)
-├── api/index.ts     # API routes, mounted at /api
+├── index.ts         # Worker entry point (Hono app, /mcp, assets fallthrough)
+├── mcp.ts           # Model Context Protocol server (tools over the API functions)
+├── api/index.ts     # API routes, mounted at /api (cursor.ts, openapi.ts, ...)
 └── db/
-    ├── schema.ts    # Drizzle schema for D1 (SQLite)
+    ├── schema.ts    # Drizzle schema v2 for D1 (labelings rows, nicknames, ...)
     └── shard.ts     # shardFor(n) — the single DB routing seam
-drizzle/             # Generated SQL migrations (wrangler d1 migrations apply)
+drizzle/             # SQL migrations (wrangler d1 migrations apply)
+data/nicknames.json  # Curated class nicknames (source of truth)
 public/              # Static frontend, served as Workers Static Assets
 wrangler.jsonc       # Worker + D1 + Static Assets config
 ```
@@ -33,15 +41,17 @@ npm run typecheck
 
 ### Loading data
 
-The Python pipeline exports one self-contained SQL file per rank (resumable;
-re-runs skip up-to-date ranks — see `qmd/d1_export.py`):
+The Python pipeline exports each rank as ordered SQL parts (resumable; re-runs
+skip up-to-date ranks — see `qmd/d1_export.py`):
 
 ```bash
-python scripts/populate.py --export-d1 dist/d1   # dist/d1/qmd-n{1..4}.sql
-for f in dist/d1/qmd-n*.sql; do
-  npx wrangler d1 execute qmd --local --file=$f   # --remote for production
-done
+python scripts/populate.py --export-d1 dist/d1   # dist/d1/qmd-n{k}.NNN.sql + manifest
+scripts/import-d1.sh dist/d1                     # --remote for production
+python scripts/nicknames.py --sql dist/nicknames.sql && npx wrangler d1 execute qmd --local --file=dist/nicknames.sql
 ```
+
+Production release (migrations → data → nicknames → deploy, in that order):
+`scripts/release-data.sh dist/d1`.
 
 ## Structure
 
@@ -53,9 +63,12 @@ qmd/                     # Offline math pipeline (pure Python, stdlib only)
 ├── local_acyclicity.py  # Banff / Louise / p-prime searches
 ├── dynkin.py            # Dynkin classification
 ├── class_properties.py  # Per-class property resolution (shared logic)
-└── d1_export.py         # GenerationResult -> per-rank SQL for D1
+└── d1_export.py         # GenerationResult -> multipart per-rank SQL for D1
 scripts/
-├── populate.py          # Generate + export the dataset (one SQL file per rank)
+├── populate.py          # Generate + export the dataset (--node-cap, --bound)
+├── import-d1.sh         # Import parts in the correct order (local/remote)
+├── nicknames.py         # Validate / render / re-resolve data/nicknames.json
+├── release-data.sh      # Production release in the safe order
 ├── api-smoke.mjs        # API assertions against wrangler dev
 └── browser-check.mjs    # Chromium end-to-end page checks
 tests/

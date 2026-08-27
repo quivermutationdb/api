@@ -121,8 +121,10 @@
 <script src="/download.js"></script>
 <script>
 const API = '/api';
-const DASH = '<span style="color:var(--rule)">—</span>';
+const DASH = '<span style="color:var(--ink-light)">—</span>';
 const yncell = v => v === true ? 'Yes' : v === false ? 'No' : DASH;
+const esc = s => String(s).replace(/[&<>"']/g,
+  ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
 
 function lookupId() {
   const val = document.getElementById('id-input').value.trim();
@@ -277,9 +279,9 @@ function renderResults(data, filters) {
       <td class="mono">${yncell(q.is_acyclic)}</td>
       <td class="mono">${yncell(q.is_connected)}</td>
       <td class="mono">${yncell(q.is_bipartite)}</td>
-      <td><span class="badge ${q.is_open ? 'badge-open' : 'badge-closed'}">${q.is_open ? 'Open' : 'Finite'}</span></td>
+      <td>${q.exploration === 'truncated' ? '<span class="badge badge-truncated">Truncated</span>' : `<span class="badge ${q.is_open ? 'badge-open' : 'badge-closed'}">${q.is_open ? 'Open' : 'Finite'}</span>`}</td>
       <td class="mono">${q.class_size ?? '∞'}</td>
-      <td><a href="/class.html?id=${encodeURIComponent(q.mc_id)}">${q.mc_id}</a></td>
+      <td><a href="/class.html?id=${encodeURIComponent(q.mc_id)}">${q.mc_id}</a>${q.nickname ? `<span class="nick">${esc(q.nickname)}</span>` : ''}</td>
     </tr>
   `).join('');
 

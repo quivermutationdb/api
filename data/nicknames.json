@@ -1,0 +1,14 @@
+{
+  "$comment": "Curated nicknames for mutation classes. Source of truth (docs/PHASE2.md §5). Each entry names a class by id AND by a member matrix, so it can be re-resolved if ids are ever re-keyed. Validate with `python scripts/nicknames.py --check`; render with `--sql`.",
+  "nicknames": [
+    {
+      "mc_id": "MC.n3.7405511b230b7552",
+      "nickname": "Markov",
+      "slug": "markov",
+      "matrix": [[0, 2, -2], [-2, 0, 2], [2, -2, 0]],
+      "note": "The Markov quiver: an oriented 3-cycle with every arrow doubled. Its mutation class is a single quiver up to relabeling, and it is the smallest quiver that is not mutation-acyclic.",
+      "added_by": "Blake Jackson",
+      "added_at": "2026-08-27"
+    }
+  ]
+}

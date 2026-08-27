@@ -145,6 +145,41 @@ check("quiver: members table lists distinct quivers (2, not 4 labelings)", membe
 check("quiver: exactly one canonical rep", stars === 1, String(stars));
 check("quiver: current quiver listed once", currentRows === 1, String(currentRows));
 
+// ---- Class page: nickname lookup, paged members, labelings view ----
+await page.goto(`${BASE}/class.html?name=markov`, { waitUntil: "networkidle" });
+await page.waitForFunction(() => document.querySelector("#page-content h1"), null, { timeout: 15000 });
+check("class: ?name=markov resolves and titles the page", (await page.locator("#page-content h1").textContent()) === "Markov");
+check("class: url rewritten to the id", page.url().includes("id=MC.n3.7405511b230b7552"));
+await page.waitForFunction(() => document.querySelectorAll("#orbit-container tbody tr").length > 0, null, { timeout: 15000 });
+await page.evaluate(() => setMode("all"));
+await page.waitForFunction(() => document.querySelectorAll("#orbit-container tbody tr").length === 2, null, { timeout: 15000 });
+check("class: 'All labelings' lists the 2 Markov labelings", true);
+await page.goto(`${BASE}/class.html?id=${mcId}`, { waitUntil: "networkidle" });
+await page.waitForFunction(() => document.querySelectorAll("#orbit-container tbody tr").length === 4, null, { timeout: 15000 });
+check("class: A3 shows 4 distinct members, canonical first",
+  (await page.locator("#orbit-container tbody tr").first().locator(".canon-mark").count()) === 1);
+await page.evaluate(() => setMode("all"));
+await page.waitForFunction(() => document.querySelectorAll("#orbit-container tbody tr").length === 14, null, { timeout: 15000 });
+check("class: A3 'All labelings' shows 14 rows", true);
+await page.evaluate(() => setLayout("grid"));
+await page.waitForFunction(() => document.querySelectorAll("#orbit-container .matrix-card").length === 14, null, { timeout: 15000 });
+check("class: grid view renders 14 cards", true);
+// Large-class path: labelings not inlined -> fetched lazily from /labelings, paged.
+await page.evaluate(() => { setLayout("table"); members.all = { items: [], next: null, total: 14, endpoint: "labelings", loaded: false }; setMode("distinct"); setMode("all"); });
+await page.waitForFunction(() => document.querySelectorAll("#orbit-container tbody tr").length === 14, null, { timeout: 15000 });
+check("class: lazy labelings load (large-class path) fills 14 rows", true);
+
+// ---- Browse: nickname shown, sort disabled in labelings scope ----
+await page.goto(`${BASE}/browse.html?`, { waitUntil: "networkidle" });
+await page.waitForFunction(() => document.querySelectorAll("#table-body tr").length === 50, null, { timeout: 15000 });
+await page.selectOption("#filter-rank", "3");
+await page.evaluate(() => applyFilters());
+await page.waitForFunction(() => document.querySelectorAll("#table-body .nick").length > 0, null, { timeout: 15000 });
+check("browse: Markov nickname shown next to its class id", (await page.locator("#table-body .nick").first().textContent()) === "Markov");
+await page.evaluate(() => setScope("labelings"));
+await page.waitForFunction(() => document.querySelectorAll("#table-body tr").length === 50, null, { timeout: 15000 });
+check("browse: sort headers disabled in labelings scope", (await page.locator("th.sort-disabled").count()) > 0);
+
 // ---- Home uses /stats and /random ----
 await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
 check("home: ranks covered derived from /stats",

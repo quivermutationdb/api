@@ -1,0 +1,52 @@
+# Quiver Mutation Database (QMD)
+
+> A curated, citable database of quivers, their exchange matrices, and mutation
+> classes, with rigorously defined invariants and transparent computational
+> provenance. Read-only public API, no authentication, CC-BY-4.0.
+
+Site: https://quivermutationdb.org · API base: https://quivermutationdb.org/api
+OpenAPI: https://quivermutationdb.org/api/openapi.json
+MCP server (Streamable HTTP, no auth): https://quivermutationdb.org/mcp
+Definitions of every property: https://quivermutationdb.org/wiki
+Maintainer: Blake Jackson <jackson@icarm.io>
+
+## Identifiers
+
+- Quiver: `Q.n{rank}.{sha256[:16]}` — hash of the lex-min canonical exchange
+  matrix (row-major lexicographically smallest relabeling). Two matrices are
+  the same quiver iff they have the same id.
+- Mutation class: `MC.n{rank}.{sha256[:16]}` — hash of the lex-min matrix over
+  the whole explored orbit. Ids are frozen; a re-keying would be announced.
+- Exchange matrix: row-major skew-symmetric integer matrix; `b_ij > 0` means
+  `b_ij` arrows from vertex i to vertex j.
+
+## Reading the data
+
+- `GET /api/stats` — totals and, per rank, how the data was generated
+  (weight bound, node cap, pipeline version, date).
+- `GET /api/quivers?rank=4&is_acyclic=true&limit=100` — filter/sort/page.
+  Every list returns `next_cursor`; pass it back as `?cursor=` (opaque).
+  `scope=labelings` gives one row per labeled exchange matrix.
+- `GET /api/quivers/{id}` · `GET /api/quivers/{id}/labelings`
+- `GET /api/classes` · `GET /api/classes/{id}` — invariants + provenance +
+  first page of members; `GET /api/classes/{id}/quivers` (distinct members,
+  canonical first) · `GET /api/classes/{id}/labelings` (every labeled matrix).
+- `GET /api/classes/by-slug/markov` · `GET /api/nicknames` — curated names.
+- `GET /api/random/quiver` · `GET /api/random/class`
+- Bulk pull: `GET /api/export.ndjson?rank=4&limit=5000` then follow the
+  `X-Next-Cursor` header until it is empty. Omit `limit` to stream the whole
+  cut. `GET /api/export?...` is the same cut as CSV.
+
+## Semantics you must respect
+
+- Three-state properties (`is_mutation_acyclic`, `is_banff`, `is_louise`,
+  `is_p_prime`, `is_finite_confirmed`, ...): `true`, `false`, or `null` =
+  unknown (the search was truncated). `null` is never a "no".
+- `exploration`: `complete` (finite class, `class_size` exact), `bound` (a
+  mutation crossed the weight bound; for rank ≥ 3 this proves mutation-
+  infinite), `truncated` (node cap reached; finiteness unknown).
+  `class_size` is `null` unless `complete`; `explored_size` is always given.
+- `is_mutation_finite=true` returns only proved-finite classes;
+  `=false` only proved-infinite ones. Undetermined classes match neither.
+- Please cite: Blake Jackson, *Quiver Mutation Database*,
+  https://quivermutationdb.org (CC-BY-4.0). Citation text: /about.

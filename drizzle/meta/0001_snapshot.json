@@ -1,0 +1,756 @@
+{
+  "version": "6",
+  "dialect": "sqlite",
+  "id": "321cb750-b2c5-4466-943c-65dbef864e1c",
+  "prevId": "81f25dd9-a555-45d0-895c-af7d389215cc",
+  "tables": {
+    "class_nicknames": {
+      "name": "class_nicknames",
+      "columns": {
+        "mc_id": {
+          "name": "mc_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "nickname": {
+          "name": "nickname",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "slug": {
+          "name": "slug",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "note": {
+          "name": "note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "added_by": {
+          "name": "added_by",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "added_at": {
+          "name": "added_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "idx_nick_slug": {
+          "name": "idx_nick_slug",
+          "columns": [
+            "slug"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "downloads": {
+      "name": "downloads",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "CURRENT_TIMESTAMP"
+        },
+        "fmt": {
+          "name": "fmt",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "row_count": {
+          "name": "row_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "filters": {
+          "name": "filters",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "email": {
+          "name": "email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "ip": {
+          "name": "ip",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "user_agent": {
+          "name": "user_agent",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "referer": {
+          "name": "referer",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "idx_dl_created_at": {
+          "name": "idx_dl_created_at",
+          "columns": [
+            "created_at"
+          ],
+          "isUnique": false
+        },
+        "idx_dl_email": {
+          "name": "idx_dl_email",
+          "columns": [
+            "email"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "frontier_quivers": {
+      "name": "frontier_quivers",
+      "columns": {
+        "mutation_class_id": {
+          "name": "mutation_class_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "ord": {
+          "name": "ord",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "matrix": {
+          "name": "matrix",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "frontier_quivers_mutation_class_id_mutation_classes_id_fk": {
+          "name": "frontier_quivers_mutation_class_id_mutation_classes_id_fk",
+          "tableFrom": "frontier_quivers",
+          "tableTo": "mutation_classes",
+          "columnsFrom": [
+            "mutation_class_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "frontier_quivers_mutation_class_id_ord_pk": {
+          "columns": [
+            "mutation_class_id",
+            "ord"
+          ],
+          "name": "frontier_quivers_mutation_class_id_ord_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "labelings": {
+      "name": "labelings",
+      "columns": {
+        "mutation_class_id": {
+          "name": "mutation_class_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "ord": {
+          "name": "ord",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "qmd_id": {
+          "name": "qmd_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "matrix": {
+          "name": "matrix",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "idx_lab_qmd_ord": {
+          "name": "idx_lab_qmd_ord",
+          "columns": [
+            "qmd_id",
+            "ord"
+          ],
+          "isUnique": false
+        },
+        "idx_lab_mc_qmd_ord": {
+          "name": "idx_lab_mc_qmd_ord",
+          "columns": [
+            "mutation_class_id",
+            "qmd_id",
+            "ord"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "labelings_mutation_class_id_mutation_classes_id_fk": {
+          "name": "labelings_mutation_class_id_mutation_classes_id_fk",
+          "tableFrom": "labelings",
+          "tableTo": "mutation_classes",
+          "columnsFrom": [
+            "mutation_class_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "labelings_mutation_class_id_ord_pk": {
+          "columns": [
+            "mutation_class_id",
+            "ord"
+          ],
+          "name": "labelings_mutation_class_id_ord_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "mutation_classes": {
+      "name": "mutation_classes",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "n": {
+          "name": "n",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "canonical_matrix": {
+          "name": "canonical_matrix",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "canonical_quiver_id": {
+          "name": "canonical_quiver_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "is_open": {
+          "name": "is_open",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "exploration": {
+          "name": "exploration",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'complete'"
+        },
+        "class_size": {
+          "name": "class_size",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "distinct_quiver_count": {
+          "name": "distinct_quiver_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "merged_orbit_count": {
+          "name": "merged_orbit_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 1
+        },
+        "dynkin_type": {
+          "name": "dynkin_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "label": {
+          "name": "label",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "is_finite_confirmed": {
+          "name": "is_finite_confirmed",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "is_infinite_confirmed": {
+          "name": "is_infinite_confirmed",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "is_infinite_expected": {
+          "name": "is_infinite_expected",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "size_of_explored_frontier": {
+          "name": "size_of_explored_frontier",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "is_mutation_acyclic": {
+          "name": "is_mutation_acyclic",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "is_banff": {
+          "name": "is_banff",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "is_louise": {
+          "name": "is_louise",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "is_p_prime": {
+          "name": "is_p_prime",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "provenance": {
+          "name": "provenance",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "idx_mc_n_id": {
+          "name": "idx_mc_n_id",
+          "columns": [
+            "n",
+            "id"
+          ],
+          "isUnique": false
+        },
+        "idx_mc_n_class_size_id": {
+          "name": "idx_mc_n_class_size_id",
+          "columns": [
+            "n",
+            "class_size",
+            "id"
+          ],
+          "isUnique": false
+        },
+        "idx_mc_n_dynkin_id": {
+          "name": "idx_mc_n_dynkin_id",
+          "columns": [
+            "n",
+            "dynkin_type",
+            "id"
+          ],
+          "isUnique": false
+        },
+        "idx_mc_n_distinct_id": {
+          "name": "idx_mc_n_distinct_id",
+          "columns": [
+            "n",
+            "distinct_quiver_count",
+            "id"
+          ],
+          "isUnique": false
+        },
+        "idx_mc_n_open_id": {
+          "name": "idx_mc_n_open_id",
+          "columns": [
+            "n",
+            "is_open",
+            "id"
+          ],
+          "isUnique": false
+        },
+        "idx_mc_finite_confirmed": {
+          "name": "idx_mc_finite_confirmed",
+          "columns": [
+            "is_finite_confirmed"
+          ],
+          "isUnique": false
+        },
+        "idx_mc_infinite_confirmed": {
+          "name": "idx_mc_infinite_confirmed",
+          "columns": [
+            "is_infinite_confirmed"
+          ],
+          "isUnique": false
+        },
+        "idx_mc_is_mutation_acyclic": {
+          "name": "idx_mc_is_mutation_acyclic",
+          "columns": [
+            "is_mutation_acyclic"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "quivers": {
+      "name": "quivers",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "n": {
+          "name": "n",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "exchange_matrix": {
+          "name": "exchange_matrix",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "mutation_class_id": {
+          "name": "mutation_class_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "max_edge": {
+          "name": "max_edge",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "is_acyclic": {
+          "name": "is_acyclic",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": true
+        },
+        "is_connected": {
+          "name": "is_connected",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": true
+        },
+        "is_bipartite": {
+          "name": "is_bipartite",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "is_abundant": {
+          "name": "is_abundant",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "is_planar": {
+          "name": "is_planar",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "labeling_count": {
+          "name": "labeling_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "labeling_offset": {
+          "name": "labeling_offset",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "representation_type": {
+          "name": "representation_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "symmetry_group": {
+          "name": "symmetry_group",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "idx_q_n_id": {
+          "name": "idx_q_n_id",
+          "columns": [
+            "n",
+            "id"
+          ],
+          "isUnique": false
+        },
+        "idx_q_n_max_edge_id": {
+          "name": "idx_q_n_max_edge_id",
+          "columns": [
+            "n",
+            "max_edge",
+            "id"
+          ],
+          "isUnique": false
+        },
+        "idx_q_n_labeling_offset": {
+          "name": "idx_q_n_labeling_offset",
+          "columns": [
+            "n",
+            "labeling_offset"
+          ],
+          "isUnique": false
+        },
+        "idx_q_representation_type": {
+          "name": "idx_q_representation_type",
+          "columns": [
+            "representation_type"
+          ],
+          "isUnique": false
+        },
+        "idx_q_mc_labcount_id": {
+          "name": "idx_q_mc_labcount_id",
+          "columns": [
+            "mutation_class_id",
+            "labeling_count",
+            "id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "quivers_mutation_class_id_mutation_classes_id_fk": {
+          "name": "quivers_mutation_class_id_mutation_classes_id_fk",
+          "tableFrom": "quivers",
+          "tableTo": "mutation_classes",
+          "columnsFrom": [
+            "mutation_class_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "rank_stats": {
+      "name": "rank_stats",
+      "columns": {
+        "n": {
+          "name": "n",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "quiver_count": {
+          "name": "quiver_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "labeled_quiver_count": {
+          "name": "labeled_quiver_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "class_count": {
+          "name": "class_count",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "bound": {
+          "name": "bound",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "node_cap": {
+          "name": "node_cap",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "generated_at": {
+          "name": "generated_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "pipeline_version": {
+          "name": "pipeline_version",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    }
+  },
+  "views": {},
+  "enums": {},
+  "_meta": {
+    "schemas": {},
+    "tables": {},
+    "columns": {}
+  },
+  "internal": {
+    "indexes": {}
+  }
+}

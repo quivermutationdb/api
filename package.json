@@ -2,7 +2,7 @@
   "name": "qmd-worker",
   "private": true,
   "type": "module",
-  "description": "Quiver Mutation Database \u2014 Cloudflare Worker (API + static frontend)",
+  "description": "Quiver Mutation Database — Cloudflare Worker (API + static frontend)",
   "license": "CC-BY-4.0",
   "scripts": {
     "dev": "wrangler dev",
@@ -17,8 +17,11 @@
     "test:browser": "node scripts/browser-check.mjs"
   },
   "dependencies": {
+    "@modelcontextprotocol/server": "^2.0.0",
+    "agents": "^0.22.0",
     "drizzle-orm": "^0.45.2",
-    "hono": "^4.13.0"
+    "hono": "^4.13.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1",

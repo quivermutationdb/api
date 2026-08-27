@@ -188,6 +188,94 @@ const json = async (path, s) => (await get(path, s)).json();
     fin.total + inf.total === all.total, `${fin.total}+${inf.total} vs ${all.total}`);
 }
 
+// ---- phase 2: cursors, paged members, nicknames, ndjson, openapi ----------
+{
+  // Keyset cursor walks the whole rank-4 list without gaps or duplicates.
+  const seen = new Set(); let cursor = ""; let pages = 0;
+  for (;;) {
+    const d = await json(`/quivers?rank=4&limit=100${cursor ? "&cursor=" + encodeURIComponent(cursor) : ""}`);
+    for (const i of d.items) seen.add(i.qmd_id);
+    pages += 1;
+    if (!d.next_cursor) break;
+    cursor = d.next_cursor;
+  }
+  check("cursor walk covers rank 4 exactly", seen.size === 695 && pages === 7, `${seen.size} in ${pages} pages`);
+  // Cursor under a non-default sort with NULLs (dynkin_type) is also gap-free.
+  const seen2 = new Set(); cursor = "";
+  for (;;) {
+    const d = await json(`/quivers?rank=3&sort=dynkin_type&dir=desc&limit=7${cursor ? "&cursor=" + encodeURIComponent(cursor) : ""}`);
+    for (const i of d.items) seen2.add(i.qmd_id);
+    if (!d.next_cursor) break;
+    cursor = d.next_cursor;
+  }
+  check("cursor walk (dynkin desc, NULLs) covers rank 3", seen2.size === 25, String(seen2.size));
+  check("bad cursor -> 400", "detail" in await json("/quivers?cursor=kZZZ", 400));
+  check("labelings scope rejects custom sort", "detail" in await json("/quivers?scope=labelings&sort=max_edge", 400));
+
+  // labelings scope pages via cursor and sums to labeled_total
+  let count = 0; cursor = "";
+  for (;;) {
+    const d = await json(`/quivers?rank=3&scope=labelings&limit=20${cursor ? "&cursor=" + encodeURIComponent(cursor) : ""}`);
+    count += d.items.length;
+    check("labelings rows carry labeling_ord", d.items.every((i) => Number.isInteger(i.labeling_ord)));
+    if (!d.next_cursor) break;
+    cursor = d.next_cursor;
+  }
+  check("labelings cursor walk sums to labeled_total (56)", count === 56, String(count));
+
+  // Class detail: first page of distinct members, canonical first; small class inline.
+  const a3 = await json("/search?dynkin_type=A3&limit=1");
+  const cls = await json(`/classes/${a3.items[0].mc_id}`);
+  check("class detail distinct page canonical first", cls.distinct_quivers[0].is_canonical === true
+    && cls.distinct_quivers.length === 4 && cls.distinct_quivers_next_cursor === null);
+  check("class detail small class inlines labelings", cls.labeled_quivers.length === 14 && cls.labeled_quivers_truncated === false);
+  check("class detail exploration", cls.exploration === "complete");
+  const mem = await json(`/classes/${a3.items[0].mc_id}/quivers?limit=2`);
+  const mem2 = await json(`/classes/${a3.items[0].mc_id}/quivers?limit=2&cursor=${encodeURIComponent(mem.next_cursor)}`);
+  const ids = [...mem.items, ...mem2.items].map((i) => i.qmd_id);
+  check("class members paged, canonical pinned, no dup", new Set(ids).size === 4 && mem.items[0].is_canonical && !mem2.next_cursor, ids.join(","));
+  const labs = await json(`/classes/${a3.items[0].mc_id}/labelings?limit=5`);
+  const labs2 = await json(`/classes/${a3.items[0].mc_id}/labelings?limit=5&cursor=${encodeURIComponent(labs.next_cursor)}`);
+  check("class labelings paged by ord", labs.items.length === 5 && labs2.items[0].ord === 5);
+  const qlabs = await json(`/quivers/${a3.items[0].qmd_id}/labelings`);
+  check("quiver labelings endpoint", qlabs.items.length >= 1 && qlabs.items.every((l) => l.mc_id === a3.items[0].mc_id));
+
+  // Large-ish class (D4, 50 labelings) still inline; explored_size present.
+  const d4 = await json("/search?dynkin_type=D4&limit=1");
+  const d4c = await json(`/classes/${d4.items[0].mc_id}`);
+  check("D4 detail inline (50 <= 200)", d4c.labeled_quivers.length === 50 && d4c.distinct_quivers.length === 6);
+
+  // Nicknames
+  const nn = await json("/nicknames");
+  check("/nicknames lists markov", nn.items.some((i) => i.slug === "markov"));
+  const mk = await json("/classes/by-slug/markov");
+  check("/classes/by-slug/markov", mk.mc_id === "MC.n3.7405511b230b7552" && mk.nickname === "Markov");
+  check("quiver rows carry nickname", (await json("/quivers?nickname=markov")).items.every((i) => i.nickname === "Markov"));
+  check("class list nickname filter", (await json("/classes?nickname=markov")).total === 1);
+  check("unknown slug -> 404", "detail" in await json("/classes/by-slug/nope", 404));
+
+  // NDJSON bulk pull with resume
+  const r1 = await get("/export.ndjson?rank=3&limit=10");
+  const lines1 = (await r1.text()).trim().split("\n");
+  const next = r1.headers.get("x-next-cursor");
+  check("ndjson page 1", lines1.length === 10 && JSON.parse(lines1[0]).qmd_id.startsWith("Q.n3.") && next);
+  const r2 = await get(`/export.ndjson?rank=3&limit=100&cursor=${encodeURIComponent(next)}`);
+  const lines2 = (await r2.text()).trim().split("\n");
+  check("ndjson resume completes rank 3", lines2.length === 15 && r2.headers.get("x-next-cursor") === "");
+  const full = await (await get("/export.ndjson?rank=2&scope=labelings")).text();
+  check("ndjson stream labelings rank 2", full.trim().split("\n").length === 5);
+
+  // OpenAPI lists every route that exists
+  const spec = await json("/openapi.json");
+  const paths = Object.keys(spec.paths);
+  check("openapi has core paths", ["/quivers", "/classes/{id}/quivers", "/export.ndjson", "/nicknames"].every((p) => paths.includes(p)));
+  check("openapi /stats", (await get("/stats", 200)) && paths.includes("/stats"));
+  check("CORS open", (await get("/health")).headers.get("access-control-allow-origin") === "*");
+  check("lists are cacheable", (await get("/quivers?limit=1")).headers.get("cache-control") === "public, max-age=300");
+  const st = await json("/stats");
+  check("stats carry provenance", st.by_rank.every((r) => r.pipeline_version === "2.0.0" && r.bound === 2));
+}
+
 // ---- /export ---------------------------------------------------------------
 {
   const res = await get("/export?rank=2");
@@ -205,7 +293,7 @@ const json = async (path, s) => (await get(path, s)).json();
     + "is_open,class_size,labeled_size,distinct_quiver_count,"
     + "merged_orbit_count,is_finite_confirmed,is_infinite_confirmed,"
     + "is_infinite_expected,size_of_explored_frontier,is_mutation_acyclic,"
-    + "is_banff,is_louise,is_p_prime"));
+    + "is_banff,is_louise,is_p_prime,exploration,nickname"));
   check("export rank 2 rows", lines.length === 1 + 3, String(lines.length));
   check("export booleans TRUE/FALSE", /,(TRUE|FALSE),/.test(lines[1]));
   check("export matrix quoted JSON", lines[1].includes('"[[0,'));

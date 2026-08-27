@@ -76,6 +76,9 @@
       <a href="#banff">Banff</a>
       <a href="#louise">Louise</a>
       <a href="#p-prime">P′</a>
+      <a href="#exploration">Exploration state</a>
+      <a href="#nicknames">Nicknames</a>
+      <a href="#api">API &amp; agents</a>
       <a href="#three-state">Three-state &amp; provenance</a>
     </aside>
 
@@ -412,6 +415,58 @@ def has_known_non_ma_subquiver(members, known_false):
         <p>A <code>truncated</code> flag is threaded through the entire search; a <b>No</b> is only
         reported when nothing was ever truncated, so it is a genuine proof rather than a failed
         bounded search. The class page records this <i>provenance</i> for each property.</p>
+      </section>
+
+      <section class="wiki-section" id="exploration">
+        <h2>Exploration state</h2>
+        <p>Every mutation class records how far its breadth-first exploration got
+        (<code>exploration</code> in the API):</p>
+        <ul>
+          <li><b>complete</b> — the bounded class was drained. The class is mutation-finite and its
+          <a href="#mutation-class-size">size</a> is exact.</li>
+          <li><b>bound</b> — some mutation produced an entry with |b<sub>ij</sub>| above the weight
+          bound. For rank ≥ 3 this proves the class mutation-infinite (Derksen–Owen); what is stored is
+          the explored part, and the <a href="#explored-frontier">frontier</a> lists the matrices with an
+          escaping mutation.</li>
+          <li><b>truncated</b> — the search stopped at the node cap. The class is only partially
+          explored and its finiteness is <em>unknown</em>: no Dynkin label, no exact size, no
+          definite "no" for any semidecidable property. Truncated classes are labelled as such on every
+          page and match neither <code>is_mutation_finite=true</code> nor <code>=false</code>.</li>
+        </ul>
+        <p>The weight bound and node cap used for each rank are returned by <code>/api/stats</code>.</p>
+      </section>
+
+      <section class="wiki-section" id="nicknames">
+        <h2>Nicknames</h2>
+        <p>Some classes have a curated name — <a href="/class.html?name=markov">Markov</a>, for
+        example. Nicknames are <em>editorial</em>, not computed: they live in
+        <code>data/nicknames.json</code> in the <a href="https://github.com/quivermutationdb/api">repository</a>,
+        each entry naming the class both by id and by a member matrix, so a name survives any
+        regeneration of the database and can even be re-resolved if identifiers were ever re-keyed.
+        Adding one means editing that file and merging to <code>main</code>; the maintainer reviews
+        every addition. Names are reachable as <code>/class.html?name=&lt;slug&gt;</code>,
+        <code>/api/classes/by-slug/&lt;slug&gt;</code>, the <code>nickname</code> filter on every
+        list, and <code>/api/nicknames</code>.</p>
+      </section>
+
+      <section class="wiki-section" id="api">
+        <h2>API &amp; agents</h2>
+        <p>Everything on this site is served by a read-only JSON API at
+        <code>https://quivermutationdb.org/api</code> — no key, CORS open, CC-BY-4.0. It is described
+        by an <a href="/api/openapi.json">OpenAPI document</a> and summarised for language models in
+        <a href="/llms.txt">/llms.txt</a>; an <b>MCP server</b> (Model Context Protocol, Streamable
+        HTTP) is at <code>https://quivermutationdb.org/mcp</code> with tools mirroring the API.</p>
+        <ul>
+          <li>Every list returns <code>next_cursor</code>; pass it back as <code>?cursor=</code>. Cursors
+          are keyset-based, so a pull is consistent and resumable even while data is being re-imported.</li>
+          <li>Class members are paged: <code>/api/classes/{id}/quivers</code> (distinct quivers,
+          canonical first) and <code>/api/classes/{id}/labelings</code> (every labeled matrix).</li>
+          <li>Bulk pulls: <code>/api/export.ndjson?…&amp;limit=5000</code> then follow the
+          <code>X-Next-Cursor</code> header until it is empty; or omit <code>limit</code> to stream a
+          whole cut. <code>/api/export</code> is the same cut as CSV.</li>
+          <li>Three-state values are <code>true</code>, <code>false</code>, or <code>null</code>
+          (unknown). <code>null</code> is never a "no".</li>
+        </ul>
       </section>
 
       <p class="wiki-foot">Code snippets are condensed from the open pipeline (canonicalization,

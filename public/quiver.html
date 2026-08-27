@@ -91,9 +91,10 @@ function renderPage(q) {
     <div class="title-block">
       <div class="qid">${q.qmd_id}</div>
       <h1>${q.label ?? ('Rank-' + n + ' Quiver')}</h1>
-      <span class="badge ${isOpen ? 'badge-open' : 'badge-closed'}">
-        ${isOpen ? 'Open class' : 'Finite type'}
-      </span>
+      ${q.exploration === 'truncated'
+        ? '<span class="badge badge-truncated" title="Class partially explored; finiteness unknown">Truncated class</span>'
+        : `<span class="badge ${isOpen ? 'badge-open' : 'badge-closed'}">${isOpen ? 'Open class' : 'Finite type'}</span>`}
+      ${q.nickname ? `<span class="badge badge-closed" style="margin-left:.4rem">Class: ${esc(q.nickname)}</span>` : ''}
     </div>
 
     <div class="two-col">
@@ -165,16 +166,42 @@ function renderPage(q) {
   fetchClassMembers(q.mc_id, q.qmd_id);
 }
 
+// Members are paged (100 per page) through /classes/{id}/quivers; the class
+// detail supplies the first page and its cursor.
+const membersState = { mcId: null, currentQid: null, canonicalQid: null, items: [], next: null, total: 0, isOpen: false };
+
 async function fetchClassMembers(mcId, currentQid) {
   const container = document.getElementById('class-members-container');
   try {
     const res = await fetch(`${API}/classes/${encodeURIComponent(mcId)}`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
-    renderClassMembers(data, currentQid);
+    Object.assign(membersState, {
+      mcId, currentQid, canonicalQid: data.canonical_qid,
+      items: data.distinct_quivers || [], next: data.distinct_quivers_next_cursor || null,
+      total: data.distinct_quiver_count, isOpen: data.is_open, labeled: data.labeled_size,
+    });
+    renderClassMembers();
   } catch (e) {
     console.error(e);
     container.innerHTML = '<p style="padding:1rem;color:var(--ink-light);font-style:italic">Class members are temporarily unavailable.</p>';
+  }
+}
+
+async function loadMoreMembers() {
+  if (!membersState.next) return;
+  const btn = document.getElementById('members-more');
+  if (btn) btn.disabled = true;
+  try {
+    const res = await fetch(`${API}/classes/${encodeURIComponent(membersState.mcId)}/quivers?cursor=${encodeURIComponent(membersState.next)}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const page = await res.json();
+    membersState.items = membersState.items.concat(page.items);
+    membersState.next = page.next_cursor;
+    renderClassMembers();
+  } catch (e) {
+    console.error(e);
+    if (btn) { btn.disabled = false; btn.textContent = 'Retry'; }
   }
 }
 
@@ -182,14 +209,14 @@ async function fetchClassMembers(mcId, currentQid) {
 // orbit for us). A quiver's ID is a property of the unlabeled quiver, so the
 // canonical representative and the current quiver each appear exactly once,
 // with the number of labelings the orbit contains shown alongside.
-function renderClassMembers(data, currentQid) {
+function renderClassMembers() {
   const container = document.getElementById('class-members-container');
-  const members = data.distinct_quivers || [];
+  const members = membersState.items;
+  const { currentQid, canonicalQid } = membersState;
   if (members.length === 0) {
     container.innerHTML = '<p style="padding:1rem;color:var(--ink-light);font-style:italic">No members found.</p>';
     return;
   }
-  const canonicalQid = data.canonical_qid;
   const rows = members.map(m => {
     const isCurrent = m.qmd_id === currentQid;
     const isCanon = m.qmd_id === canonicalQid;
@@ -206,13 +233,16 @@ function renderClassMembers(data, currentQid) {
       <td class="mono">${notes.join(' · ')}</td>
     </tr>`;
   }).join('');
-  const labeledTotal = members.reduce((acc, m) => acc + (m.labeling_count ?? 1), 0);
+  const shown = members.length, total = membersState.total;
   container.innerHTML = `
     <table class="members-table">
       <thead><tr><th>Quiver ID</th><th style="text-align:right">Labelings</th><th>Notes</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
-    <p style="padding:0.75rem;font-family:var(--mono);font-size:0.72rem;color:var(--ink-light)">${members.length} distinct quiver${members.length === 1 ? '' : 's'} · ${labeledTotal} labeled exchange matrices${data.is_open ? ' explored so far (open class)' : ''}.</p>
+    <div class="load-more">
+      <span>${shown === total ? `${total} distinct quiver${total === 1 ? '' : 's'}` : `Showing ${shown} of ${total} distinct quivers`} · ${membersState.labeled} labeled exchange matrices${membersState.isOpen ? ' explored so far' : ''}.</span>
+      ${membersState.next ? '<button type="button" class="btn btn-ghost" id="members-more" onclick="loadMoreMembers()">Load more</button>' : ''}
+    </div>
   `;
 }
 

@@ -129,8 +129,15 @@ let sortCol = 'num_vertices';
 let sortDir = 'asc';
 let filters = {};
 
-const DASH = '<span style="color:var(--rule)">—</span>';
+const DASH = '<span style="color:var(--ink-light)">—</span>';
 const yncell = v => v === true ? 'Yes' : v === false ? 'No' : DASH;
+const esc = s => String(s).replace(/[&<>"']/g,
+  ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
+// Class badge from the exploration state (complete / bound / truncated).
+function classBadge(q) {
+  if (q.exploration === 'truncated') return '<span class="badge badge-truncated" title="Partially explored; finiteness unknown">Truncated</span>';
+  return `<span class="badge ${q.is_open ? 'badge-open' : 'badge-closed'}">${q.is_open ? 'Open' : 'Finite'}</span>`;
+}
 
 async function fetchQuivers(page = 1) {
   const offset = (page - 1) * PAGE_SIZE;
@@ -191,13 +198,9 @@ function renderTable(data) {
       <td class="mono">${yncell(q.is_acyclic)}</td>
       <td class="mono">${yncell(q.is_connected)}</td>
       <td class="mono">${yncell(q.is_bipartite)}</td>
-      <td>
-        <span class="badge ${q.is_open ? 'badge-open' : 'badge-closed'}">
-          ${q.is_open ? 'Open' : 'Finite'}
-        </span>
-      </td>
-      <td class="mono">${q.class_size ?? '<span style="color:var(--rule)">∞</span>'}</td>
-      <td><a href="/class.html?id=${encodeURIComponent(q.mc_id)}">${q.mc_id}</a></td>
+      <td>${classBadge(q)}</td>
+      <td class="mono">${q.class_size ?? '<span style="color:var(--ink-light)">∞</span>'}</td>
+      <td><a href="/class.html?id=${encodeURIComponent(q.mc_id)}">${q.mc_id}</a>${q.nickname ? `<span class="nick">${esc(q.nickname)}</span>` : ''}</td>
       <td class="mono">${q.exchange_matrix ? q.exchange_matrix.flat().join(', ') : DASH}</td>
     </tr>
   `).join('');
@@ -264,6 +267,17 @@ function setScope(s) {
   scope = s;
   document.getElementById('btn-distinct').classList.toggle('active', s === 'distinct');
   document.getElementById('btn-labeled').classList.toggle('active', s === 'labelings');
+  // The labelings scope is served in (rank, id, labeling) order only — the
+  // API refuses other sorts rather than sorting every labeled matrix live.
+  if (s === 'labelings') {
+    sortCol = 'num_vertices'; sortDir = 'asc';
+    document.querySelectorAll('th[data-col]').forEach(t => {
+      t.classList.remove('sorted'); t.classList.add('sort-disabled');
+      t.querySelector('.sort-arrow').textContent = '↕';
+    });
+  } else {
+    document.querySelectorAll('th[data-col]').forEach(t => t.classList.remove('sort-disabled'));
+  }
   currentPage = 1;
   goPage(1);
 }
@@ -296,6 +310,7 @@ function resetFilters() {
 document.querySelectorAll('th[data-col]').forEach(th => {
   th.addEventListener('click', (e) => {
     if (e.target.closest('.col-info')) return;   // wiki link, not a sort
+    if (scope === 'labelings') return;           // sort disabled in this scope
     const col = th.dataset.col;
     if (sortCol === col) sortDir = sortDir === 'asc' ? 'desc' : 'asc';
     else { sortCol = col; sortDir = 'asc'; }

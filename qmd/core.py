@@ -321,14 +321,22 @@ class _RawOrbit:
     labeled_quivers : list[Matrix]
     quiver_ids      : list[str]       # parallel to labeled_quivers
     qid_set         : set[str]        # fast membership test
-    is_open         : bool
+    is_open         : bool            # hit the weight bound OR was truncated
     boundary_quivers: list[Matrix]
+    truncated       : bool = False    # stopped by the node cap (finiteness unknown)
 
 
-def _bfs_orbit(seed: Matrix, bound: int = 2) -> _RawOrbit:
+def _bfs_orbit(seed: Matrix, bound: int = 2,
+               node_cap: Optional[int] = None) -> _RawOrbit:
     """
     BFS over all matrices reachable from `seed` by bounded mutation.
     Returns the raw labeled orbit without any gluing.
+
+    `node_cap` bounds the number of labeled matrices visited. Reaching it sets
+    `truncated` (and `is_open`): the orbit is a *partial* exploration whose
+    finiteness is unknown — it must never be stored as a finite class.
+    Matrices are returned in lex-sorted order so the orbit (and everything
+    derived from it, e.g. `labelings.ord`) is deterministic.
     """
     assert is_skew_symmetric(seed), "Seed must be skew-symmetric"
     assert is_bounded(seed, bound), \
@@ -339,8 +347,12 @@ def _bfs_orbit(seed: Matrix, bound: int = 2) -> _RawOrbit:
     queue   : deque[Matrix] = deque([seed])
     visited.add(seed)
     is_open = False
+    truncated = False
 
     while queue:
+        if node_cap is not None and len(visited) >= node_cap:
+            truncated = True
+            break
         current = queue.popleft()
         at_boundary = False
         for k in range(len(current)):
@@ -355,14 +367,15 @@ def _bfs_orbit(seed: Matrix, bound: int = 2) -> _RawOrbit:
         if at_boundary:
             boundary.add(current)
 
-    labeled = list(visited)
+    labeled = sorted(visited)
     qids    = [quiver_id(m) for m in labeled]
     return _RawOrbit(
         labeled_quivers  = labeled,
         quiver_ids       = qids,
         qid_set          = set(qids),
-        is_open          = is_open,
-        boundary_quivers = list(boundary),
+        is_open          = is_open or truncated,
+        boundary_quivers = sorted(boundary),
+        truncated        = truncated,
     )
 
 
@@ -403,6 +416,11 @@ class MutationClassResult:
     merged_orbit_count : int
         Number of raw BFS orbits that were glued to form this class.
         1 means no gluing occurred.
+
+    exploration : str
+        'complete'  — the bounded class was drained (finite, exact size)
+        'bound'     — some mutation crossed the weight bound (partial)
+        'truncated' — the node cap stopped a BFS (partial; finiteness unknown)
     """
     labeled_quivers    : list[Matrix]
     quiver_ids         : list[str]
@@ -411,6 +429,7 @@ class MutationClassResult:
     is_open            : bool
     boundary_quivers   : list[Matrix] = field(default_factory=list)
     merged_orbit_count : int = 1
+    exploration        : str = "complete"
 
     @property
     def labeled_size(self) -> int:
@@ -436,9 +455,11 @@ def _merge_orbits(orbits: list[_RawOrbit]) -> MutationClassResult:
     merged_qids     : list[str]    = []
     merged_boundary : list[Matrix] = []
     is_open = False
+    truncated = False
 
     for orbit in orbits:
         is_open = is_open or orbit.is_open
+        truncated = truncated or orbit.truncated
         for m, qid in zip(orbit.labeled_quivers, orbit.quiver_ids):
             if m not in seen_labeled:
                 seen_labeled.add(m)
@@ -451,6 +472,12 @@ def _merge_orbits(orbits: list[_RawOrbit]) -> MutationClassResult:
                 seen_boundary.add(b)
                 merged_boundary.append(b)
 
+    # Deterministic member order (lex) regardless of which orbits were glued.
+    order = sorted(range(len(merged_labeled)), key=lambda i: merged_labeled[i])
+    merged_labeled = [merged_labeled[i] for i in order]
+    merged_qids    = [merged_qids[i] for i in order]
+    merged_boundary.sort()
+
     canon_rep = canonical_class_rep(merged_labeled)
     mc_id_str = mutation_class_id(canon_rep)
 
@@ -462,6 +489,8 @@ def _merge_orbits(orbits: list[_RawOrbit]) -> MutationClassResult:
         is_open            = is_open,
         boundary_quivers   = merged_boundary,
         merged_orbit_count = len(orbits),
+        exploration        = ("truncated" if truncated
+                              else "bound" if is_open else "complete"),
     )
 
 
@@ -469,7 +498,8 @@ def _merge_orbits(orbits: list[_RawOrbit]) -> MutationClassResult:
 # Public BFS entry point  (single seed, no pipeline context)
 # ---------------------------------------------------------------------------
 
-def explore_mutation_class(seed: Matrix, bound: int = 2) -> MutationClassResult:
+def explore_mutation_class(seed: Matrix, bound: int = 2,
+                           node_cap: Optional[int] = None) -> MutationClassResult:
     """
     Explore the mutation class of a single seed via bounded BFS.
 
@@ -482,7 +512,7 @@ def explore_mutation_class(seed: Matrix, bound: int = 2) -> MutationClassResult:
     seed  : starting exchange matrix (skew-symmetric and bounded)
     bound : maximum allowed |b_ij| at each step (default 2)
     """
-    orbit = _bfs_orbit(seed, bound)
+    orbit = _bfs_orbit(seed, bound, node_cap)
     return _merge_orbits([orbit])
 
 
@@ -570,7 +600,8 @@ class GenerationResult:
 
 
 def run_generation(max_vertices: int = 4, bound: int = 2,
-                   ranks: Optional[Iterable[int]] = None) -> GenerationResult:
+                   ranks: Optional[Iterable[int]] = None,
+                   node_cap: Optional[int] = None) -> GenerationResult:
     """
     Full four-phase generation pipeline.
 
@@ -611,7 +642,7 @@ def run_generation(max_vertices: int = 4, bound: int = 2,
         seed_qid = quiver_id(seed)
         if seed_qid in covered_qids:
             continue
-        orbit = _bfs_orbit(seed, bound)
+        orbit = _bfs_orbit(seed, bound, node_cap)
         raw_orbits.append(orbit)
         covered_qids.update(orbit.qid_set)
 
