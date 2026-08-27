@@ -133,11 +133,12 @@
         <p>Two matrices that differ only by a relabeling of the vertices are the same unlabeled
         quiver. To give each isomorphism class a single stable identifier, we compute a
         <b>canonical form</b> (the unique representative of the class) and hash it. The canonical
-        form is found with <i>nauty</i> (graph canonical labeling) when available, falling back to
-        the lexicographically smallest matrix over all n! relabelings. The ID is
+        form is <em>defined</em> as the lexicographically smallest matrix (row-major order) over
+        all n! relabelings; it is computed exactly by a branch-and-bound search and does not
+        depend on any optional library. The ID is
         <code>Q.n{rank}.{sha256[:16]}</code>; a mutation class is <code>MC.n{rank}.{…}</code>.</p>
         <pre class="code-block"><code>def quiver_id(matrix):
-    canon = canonical_form(matrix)           # nauty, or lex-min over n! relabelings
+    canon = canonical_form(matrix)           # lex-min over all relabelings
     blob = json.dumps(to_lists(canon), separators=(',', ':'))
     return "Q.n%d.%s" % (len(canon), sha256(blob)[:16])</code></pre>
       </section>

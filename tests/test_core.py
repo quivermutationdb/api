@@ -19,7 +19,9 @@ from qmd.canonicalize import (  # noqa: E402
     _lex_key,
     active_backend,
     are_isomorphic,
+    canonical_backend,
     canonical_form,
+    lexmin_form,
     verify_with_fallback,
 )
 from qmd.core import (  # noqa: E402
@@ -101,6 +103,26 @@ def test_dispatch_agrees_with_permutation_backend(label, m):
     assert canonical_form(m) == perm_canon.canonical_form(m)
 
 
+def test_id_key_backend_is_always_lexmin():
+    assert canonical_backend() == "lexmin"
+
+
+def test_lexmin_branch_and_bound_matches_brute_force():
+    """The production canonicalizer vs the n! oracle on random matrices."""
+    import random
+    rng = random.Random(4242)
+    for _ in range(300):
+        n = rng.randint(1, 6)
+        m = [[0] * n for _ in range(n)]
+        for i in range(n):
+            for j in range(i + 1, n):
+                w = rng.choice([0, 0, 0, 1, -1, 1, -1, 2, -2, 3])
+                m[i][j], m[j][i] = w, -w
+        m = to_matrix(m)
+        assert lexmin_form(m) == perm_canon.canonical_form(m)
+        assert verify_with_fallback(m)
+
+
 def test_are_isomorphic():
     assert are_isomorphic(A2, A2_flip)
     assert are_isomorphic(A3, A3_rev)
@@ -109,9 +131,22 @@ def test_are_isomorphic():
 
 
 @pytest.mark.skipif(active_backend() != "nauty", reason="nauty backend not active")
-@pytest.mark.parametrize("label,m", [("A2", A2), ("A3", A3), ("D4", D4), ("kronecker", kronecker)])
-def test_nauty_agrees_with_permutation_backend(label, m):
-    assert verify_with_fallback(m)
+def test_nauty_certificates_agree_with_lexmin_equality():
+    import random
+    rng = random.Random(99)
+    for _ in range(200):
+        n = rng.randint(2, 6)
+        m = [[0] * n for _ in range(n)]
+        for i in range(n):
+            for j in range(i + 1, n):
+                w = rng.choice([0, 0, 1, -1, 2, -2])
+                m[i][j], m[j][i] = w, -w
+        m = to_matrix(m)
+        perm = list(range(n)); rng.shuffle(perm)
+        relabeled = _apply_permutation(m, tuple(perm))
+        other = to_matrix([[0] * n for _ in range(n)])
+        assert are_isomorphic(m, relabeled)
+        assert are_isomorphic(m, other) == (canonical_form(m) == canonical_form(other))
 
 
 # ---------------------------------------------------------------------------

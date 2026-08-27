@@ -75,7 +75,7 @@ from dataclasses import dataclass, field
 from itertools import permutations, product
 from typing import Iterable, Optional
 
-from qmd.canonicalize import (
+from qmd.canonicalize import (  # noqa: F401  (re-exported for callers)
     canonical_form,
     are_isomorphic,
     active_backend,
@@ -258,12 +258,10 @@ def canonical_class_rep(labeled_matrices: list[Matrix]) -> Matrix:
       (c) which subset of orbits have been merged so far (adding more
           matrices can only decrease or maintain the minimum).
     """
-    return min(
-        (_apply_permutation(m, perm)
-         for m in labeled_matrices
-         for perm in permutations(range(len(m)))),
-        key=_lex_key,
-    )
+    # The lex-min over the union of the relabeling orbits equals the minimum
+    # of the per-member lex-mins, so one branch-and-bound call per member
+    # replaces the n! enumeration (identical result by definition).
+    return min((canonical_form(m) for m in labeled_matrices), key=_lex_key)
 
 
 # ---------------------------------------------------------------------------

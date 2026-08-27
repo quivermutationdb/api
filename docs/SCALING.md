@@ -58,23 +58,27 @@ Infeasible even at bound=2, n=8. **Must be replaced**, not tuned. Options:
   Note even this produces astronomically many iso classes at n=10; a census is
   only storable for small n or with a low height cap.
 
-### 1b. `canonicalize.PermutationCanonicalizer` — O(n!·n²) fallback
-10! = 3.6M perms per call, and `canonical_form` is called constantly (every BFS
-node, every quiver_id). **nauty becomes mandatory.** Today pynauty is optional with
-a silent permutation fallback. At n=10 the fallback is unusable, so:
-- Pin `pynauty` in `requirements.txt`.
-- Make the backend non-silent at scale: fail loudly (or refuse to populate) if
-  `active_backend() != "nauty"` when `max_vertices > 6`.
-- Verify pynauty actually builds on whatever box runs generation (it has a C
-  extension / nauty dep); generation never runs on Cloudflare.
+### 1b. `canonicalize.canonical_form` — lex-min is the *definition* of the ID
+**The ID key is the row-major lex-min matrix over all relabelings, and must stay
+so** (every published id hashes it; `tests/golden/ids-n4.json` pins them). nauty's
+canonical labeling is a *different* canonical form — it can never replace lex-min
+for IDs, only speed up isomorphism tests (`are_isomorphic` uses nauty certificates
+when `pynauty` is installed; `QMD_NAUTY=0/1` controls it).
 
-### 1c. `core.canonical_class_rep` — O(class_size · n!)
-`min(_apply_permutation(m, perm) for m in labeled for perm in permutations(n))`.
-At n=10 that's 3.6M perms × (10⁴–10⁵ members) per class. Catastrophic, and it runs
-once per class in `_merge_orbits`. **Rewrite** to use nauty: the lex-min over all
-relabelings of all members equals `min(canonical_form(m) for m in members)` because
-nauty's `canonical_form` is already iso-invariant. One nauty call per member, then a
-lex-min — drops n! entirely.
+`canonical_form` is now a branch-and-bound search (`lexmin_form`), exact for all n
+and far below n! in practice, but its worst case (highly symmetric sparse quivers)
+is still exponential. Measured on this machine (random weight ≤2 quivers, 20 each):
+n=6 median 0.4 ms · n=8 median 1.1 ms (max 2.5) · n=10 median 6 ms (max 24) — versus
+minutes for 10! brute force. But a single-arrow quiver on 10 vertices (maximal
+symmetry) takes ~6 s. Measure on the real n=10 seed set before committing;
+if it is too slow, the next pruning step is nauty's automorphism group / orbit
+partition to cut symmetric branches — still producing lex-min, just faster.
+
+### 1c. `core.canonical_class_rep` — done
+Now `min(canonical_form(m) for m in members)`: the lex-min over the union of the
+members' relabeling orbits is the minimum of the per-member lex-mins (identical
+by definition — the golden-ID test proves it for n≤4). One branch-and-bound call
+per member; no n! factor.
 
 ### 1d. `invariants.symmetry_group` — O(n!) automorphism search
 Enumerates all n! permutations checking `b_{σ(i)σ(j)} == b_{ij}`. The docstring even
