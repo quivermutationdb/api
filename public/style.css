@@ -818,12 +818,19 @@ th[data-col]:hover { color: var(--accent); }
 .wiki-toc {
   position: sticky;
   top: 68px;
+  /* The contents list is taller than most viewports: cap it below the
+     sticky nav and let it scroll on its own instead of only revealing its
+     tail once the article has been scrolled to the end. */
+  max-height: calc(100vh - 68px - 1rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
   gap: 0.1rem;
   font-size: 0.82rem;
   border-right: 1px solid var(--rule);
   padding-right: 1rem;
+  padding-bottom: 1rem;
 }
 .wiki-toc-group {
   font-family: var(--mono);
@@ -1132,3 +1139,43 @@ th.sort-disabled .sort-arrow { opacity: 0.25; }
 .load-more { display: flex; justify-content: center; padding: 0.75rem; gap: 1rem; align-items: center;
   font-family: var(--mono); font-size: 0.78rem; color: var(--ink-light); }
 .badge-truncated { background: var(--accent-soft); color: var(--accent); border: 1px solid var(--rule-strong); }
+
+/* --- "Instructions for LLMs" help box (every page, above the footer) ------- */
+.llm-help {
+  max-width: 1100px;
+  margin: 3rem auto 0;
+  padding: 0 2rem;
+}
+.llm-help details {
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: var(--bg-card);
+}
+.llm-help summary {
+  cursor: pointer;
+  padding: 0.7rem 1rem;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.llm-help summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.llm-help .llm-body {
+  padding: 0 1rem 1rem;
+  font-size: 0.9rem;
+  color: var(--ink);
+  max-width: 78ch;
+}
+.llm-help .llm-body p { margin: 0.5rem 0; }
+.llm-help .llm-body pre {
+  background: var(--bg);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  padding: 0.6rem 0.8rem;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  overflow-x: auto;
+  white-space: pre-wrap;
+}
+.llm-help .llm-body code { font-family: var(--mono); font-size: 0.85em; }

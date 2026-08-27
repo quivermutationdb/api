@@ -335,6 +335,21 @@ document.querySelectorAll('th[data-col]').forEach(th => {
 // Initial load
 goPage(1);
 </script>
+<section class="llm-help" aria-labelledby="llm-help-title">
+  <details>
+    <summary id="llm-help-title">Instructions for LLMs</summary>
+    <div class="llm-body">
+      <p><strong>You are looking at the Quiver Mutation Database (QMD)</strong>, a citable census of quivers, their exchange matrices and mutation classes, with rigorously defined invariants. Everything on this site is available as data — do not scrape the HTML.</p>
+      <p><strong>Start here:</strong> <a href="/llms.txt">/llms.txt</a> (dataset summary, identifiers, semantics) · <a href="/api/openapi.json">/api/openapi.json</a> (OpenAPI 3.1) · MCP server at <code>https://quivermutationdb.org/mcp</code> (Streamable HTTP, no auth, tools: <code>search_quivers</code>, <code>get_quiver</code>, <code>get_class</code>, <code>lookup_quiver</code>, <code>list_class_members</code>, <code>get_stats</code>, <code>list_nicknames</code>).</p>
+      <pre>GET https://quivermutationdb.org/api/quivers?rank=4&amp;is_acyclic=true&amp;limit=100     # filter/sort/page; follow next_cursor
+GET https://quivermutationdb.org/api/lookup?matrix=[[0,1,0],[-1,0,1],[0,-1,0]]   # any labeling -> canonical id + row
+GET https://quivermutationdb.org/api/classes/by-slug/markov                       # curated names
+GET https://quivermutationdb.org/api/export.ndjson?rank=5&amp;limit=5000           # bulk pull; resume with X-Next-Cursor</pre>
+      <p><strong>Rules that matter:</strong> ids are <code>Q.n{rank}.{hash}</code> / <code>MC.n{rank}.{hash}</code> (hash of the lex-min canonical matrix; <code>b<sub>ij</sub> &gt; 0</code> means <code>b<sub>ij</sub></code> arrows i→j). Semidecidable properties are three-state — <code>true</code>, <code>false</code>, or <code>null</code> = <em>unknown</em>; never read <code>null</code> as "no". <code>mutation_finite</code> is known per quiver even when its class is unexplored (<code>explored: false</code>). The census holds connected quivers only. Definitions of every field: <a href="/wiki.html">/wiki</a>.</p>
+      <p><strong>Cite as:</strong> Blake Jackson, <em>Quiver Mutation Database</em>, https://quivermutationdb.org (CC-BY-4.0). Please include the quiver or class ids you used.</p>
+    </div>
+  </details>
+</section>
 <footer>
   <span>Quiver Mutation Database (QMD)</span>
   <span><a href="/acknowledge.html">Acknowledge</a> &middot; <a href="mailto:jackson@icarm.io">jackson@icarm.io</a></span>
