@@ -55,6 +55,9 @@ CREATE TABLE IF NOT EXISTS quivers (
   invariants_done INTEGER DEFAULT 0, label_done INTEGER DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS stages (name TEXT PRIMARY KEY, done INTEGER, info TEXT);
+-- Parents whose extension has been committed: the generate stage resumes from
+-- here, so a kill costs at most one commit batch instead of the whole stage.
+CREATE TABLE IF NOT EXISTS parents_done (idx INTEGER PRIMARY KEY);
 """
 
 
@@ -83,35 +86,56 @@ def _mark(con, name, info=None) -> None:
 # ---------------------------------------------------------------------------
 
 def _children_job(args):
-    parent, h = args
+    idx, parent, h = args
     out = []
     for child in census.children(parent, h):
         if is_connected(child):
             cf = canonical_form(child)
             out.append((quiver_id(cf), encode_upper(cf)))
-    return out
+    return idx, out
+
+
+BATCH_PARENTS = 200          # commit (and checkpoint) this often while extending
 
 
 def stage_generate(con, n: int, h: int, workers: int, log) -> None:
+    """
+    Extend every key-minimal (n-1)-parent into rank-n children, resumably.
+
+    Parents are deterministic and sorted, so their index identifies them across
+    runs; `parents_done` records the ones whose children are committed. A kill
+    therefore costs at most BATCH_PARENTS parents of work, not the stage.
+    Children are INSERT OR IGNORE, so re-running a parent is harmless.
+    """
     if _stage_done(con, "generate"):
         log("  generate: done"); return
     parents = list(census.generate_cell(n - 1, h, workers=workers,
                                         progress=lambda k, c: log(f"    level {k}: {c}")))
-    log(f"    {len(parents)} parents at rank {n - 1}; extending ...")
+    done = {r[0] for r in con.execute("SELECT idx FROM parents_done")}
+    todo = [(i, p, h) for i, p in enumerate(parents) if i not in done]
+    have = con.execute("SELECT count(*) FROM quivers").fetchone()[0]
+    log(f"    {len(parents)} parents at rank {n - 1}; {len(done)} already extended "
+        f"({have} quivers stored), {len(todo)} to go ...")
     import multiprocessing as mp
-    con.execute("DELETE FROM quivers")
-    count = 0
+    count = have
+    pending = 0
     with mp.get_context("fork").Pool(workers) as pool:
-        for i, kids in enumerate(pool.imap_unordered(_children_job, [(p, h) for p in parents], chunksize=4), 1):
+        for i, (idx, kids) in enumerate(pool.imap_unordered(_children_job, todo, chunksize=4), 1):
             con.executemany("INSERT OR IGNORE INTO quivers (id, upper) VALUES (?, ?)", kids)
+            con.execute("INSERT OR IGNORE INTO parents_done VALUES (?)", (idx,))
             count += len(kids)
-            if i % 500 == 0 or i == len(parents):
-                con.commit(); log(f"    extended {i}/{len(parents)} parents, {count} quivers")
+            pending += 1
+            if pending >= BATCH_PARENTS or i == len(todo):
+                con.commit()
+                con.execute("PRAGMA wal_checkpoint(TRUNCATE)")   # keep the WAL bounded
+                pending = 0
+                log(f"    extended {len(done) + i}/{len(parents)} parents, {count} quivers")
     con.commit()
     total = con.execute("SELECT count(*) FROM quivers").fetchone()[0]
     expected = census.count_connected_quivers(n, h)
     if total != expected:
-        raise SystemExit(f"generated {total} connected quivers, expected {expected}")
+        raise SystemExit(f"generated {total} connected quivers, expected {expected} "
+                         f"(resume by re-running; parents_done has {len(done) + len(todo)} entries)")
     _mark(con, "generate", {"quivers": total})
     log(f"  generate: {total} quivers (matches the exact count)")
 
@@ -160,6 +184,7 @@ def stage_invariants(con, path: str, n: int, workers: int, log, chunk: int = 200
             con.commit()
             done += len(out)
             if done % (chunk * 25) == 0:
+                con.execute("PRAGMA wal_checkpoint(TRUNCATE)")
                 log(f"    invariants {done}/{todo}")
     _mark(con, "invariants")
     log("  invariants: done")
@@ -213,6 +238,7 @@ def stage_label(con, path: str, n: int, cap: int, workers: int, log, chunk: int 
             con.commit()
             done += len(out)
             if done % (chunk * 50) == 0:
+                con.execute("PRAGMA wal_checkpoint(TRUNCATE)")
                 log(f"    labelled {done}/{todo}")
     _mark(con, "label")
     counts = con.execute("SELECT mutation_finite, count(*) FROM quivers GROUP BY 1").fetchall()

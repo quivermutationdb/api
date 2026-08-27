@@ -164,3 +164,39 @@ def test_exporter_refuses_disconnected_quivers():
     r = run_generation(max_vertices=3, bound=2, ranks=[3], seeds=[to_matrix([[0, 1, 0], [-1, 0, 0], [0, 0, 0]])])
     with pytest.raises(RuntimeError, match="disconnected"):
         d1_export.build_rank_rows(r, 3, known_acyclicity={}, bound=2)
+
+
+def test_bigcell_generate_stage_is_resumable(tmp_path):
+    """
+    A kill during `generate` must not discard the parents already extended:
+    on restart the committed parents are skipped, the uncommitted ones are
+    redone, and the cell still comes out exactly right.
+    """
+    from qmd import bigcell
+    con = bigcell._db(str(tmp_path / "work.sqlite"))
+    logs = []
+    bigcell.stage_generate(con, 4, 2, 2, logs.append)
+    expected = census.count_connected_quivers(4, 2)
+    assert con.execute("SELECT count(*) FROM quivers").fetchone()[0] == expected
+    all_parents = con.execute("SELECT count(*) FROM parents_done").fetchone()[0]
+    assert all_parents == census.count_quivers(3, 2)          # every rank-3 parent recorded
+
+    # Simulate a crash mid-stage: the stage marker and the last parents' progress
+    # are gone, but the quivers they already committed are still there.
+    con.execute("DELETE FROM stages")
+    con.execute("DELETE FROM parents_done WHERE idx >= ?", (all_parents // 2,))
+    con.commit()
+    kept = con.execute("SELECT count(*) FROM parents_done").fetchone()[0]
+
+    logs.clear()
+    bigcell.stage_generate(con, 4, 2, 2, logs.append)
+    assert any(f"{kept} already extended" in l for l in logs), logs[:3]
+    assert con.execute("SELECT count(*) FROM quivers").fetchone()[0] == expected
+    assert con.execute("SELECT count(*) FROM parents_done").fetchone()[0] == all_parents
+    assert bigcell._stage_done(con, "generate")
+
+    # A finished stage is a no-op, and never deletes what is stored.
+    logs.clear()
+    bigcell.stage_generate(con, 4, 2, 2, logs.append)
+    assert logs == ["  generate: done"]
+    assert con.execute("SELECT count(*) FROM quivers").fetchone()[0] == expected
