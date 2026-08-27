@@ -135,6 +135,16 @@ await page.waitForFunction(() => document.querySelectorAll("#results-area tbody 
 check("search: deep link fills the form",
   await page.inputValue("#f-rank") === "3" && await page.isChecked("#f-acyclic"));
 
+// ---- Class members table: one row per distinct quiver, one canonical star ----
+await page.goto(`${BASE}/quiver.html?id=Q.n4.d5a342bfb1d3d96c`, { waitUntil: "networkidle" });
+await page.waitForFunction(() => document.querySelectorAll("#class-members-container tbody tr").length > 0, null, { timeout: 15000 });
+const memberRows = await page.locator("#class-members-container tbody tr").count();
+const stars = await page.locator("#class-members-container tbody tr.is-canon").count();
+const currentRows = await page.locator("#class-members-container tbody tr", { hasText: "current" }).count();
+check("quiver: members table lists distinct quivers (2, not 4 labelings)", memberRows === 2, String(memberRows));
+check("quiver: exactly one canonical rep", stars === 1, String(stars));
+check("quiver: current quiver listed once", currentRows === 1, String(currentRows));
+
 // ---- Home uses /stats and /random ----
 await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
 check("home: ranks covered derived from /stats",

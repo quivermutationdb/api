@@ -135,7 +135,7 @@ function renderPage(q) {
 
     <div class="section section-full">
       <div class="section-label">
-        Other labeled quivers in this mutation class
+        Quivers in this mutation class
         ${q.class_size ? `<span style="font-weight:400;opacity:0.6"> — ${q.class_size} total</span>` : ''}
       </div>
       <div id="class-members-container">
@@ -166,44 +166,53 @@ function renderPage(q) {
 }
 
 async function fetchClassMembers(mcId, currentQid) {
+  const container = document.getElementById('class-members-container');
   try {
     const res = await fetch(`${API}/classes/${encodeURIComponent(mcId)}`);
-    if (!res.ok) throw new Error();
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
-    renderClassMembers(data.labeled_quivers, currentQid, data.canonical_qid);
-  } catch {
-    // Demo: show a few synthetic rows
-    const rows = Array.from({length: 6}, (_, i) => ({
-      qmd_id: i === 0 ? currentQid : `Q.n3.${(0xabc123 + i * 0x1f).toString(16).padEnd(16,'0')}`,
-      is_canonical: i === 2,
-    }));
-    renderClassMembers(rows, currentQid, rows[2].qmd_id);
+    renderClassMembers(data, currentQid);
+  } catch (e) {
+    console.error(e);
+    container.innerHTML = '<p style="padding:1rem;color:var(--ink-light);font-style:italic">Class members are temporarily unavailable.</p>';
   }
 }
 
-function renderClassMembers(members, currentQid, canonicalQid) {
+// One row per *distinct* quiver in the class (the API collapses the labeled
+// orbit for us). A quiver's ID is a property of the unlabeled quiver, so the
+// canonical representative and the current quiver each appear exactly once,
+// with the number of labelings the orbit contains shown alongside.
+function renderClassMembers(data, currentQid) {
   const container = document.getElementById('class-members-container');
-  if (!members || members.length === 0) {
+  const members = data.distinct_quivers || [];
+  if (members.length === 0) {
     container.innerHTML = '<p style="padding:1rem;color:var(--ink-light);font-style:italic">No members found.</p>';
     return;
   }
+  const canonicalQid = data.canonical_qid;
   const rows = members.map(m => {
     const isCurrent = m.qmd_id === currentQid;
     const isCanon = m.qmd_id === canonicalQid;
+    const notes = [];
+    if (isCanon) notes.push('★ canonical rep');
+    if (isCurrent) notes.push('current');
+    const labelings = m.labeling_count ?? 1;
     return `<tr class="${isCanon ? 'is-canon' : ''}">
       <td>${isCurrent
-        ? `<span style="font-family:var(--mono);font-size:0.72rem">${m.qmd_id} <span style="color:var(--ink-light)">(current)</span></span>`
+        ? `<span style="font-family:var(--mono);font-size:0.72rem">${m.qmd_id}</span>`
         : `<a href="/quiver.html?id=${encodeURIComponent(m.qmd_id)}">${m.qmd_id}</a>`}
       </td>
-      <td class="mono">${isCanon ? '★ canonical rep' : ''}</td>
+      <td class="mono" style="text-align:right">${labelings}</td>
+      <td class="mono">${notes.join(' · ')}</td>
     </tr>`;
   }).join('');
+  const labeledTotal = members.reduce((acc, m) => acc + (m.labeling_count ?? 1), 0);
   container.innerHTML = `
     <table class="members-table">
-      <thead><tr><th>Quiver ID</th><th>Notes</th></tr></thead>
+      <thead><tr><th>Quiver ID</th><th style="text-align:right">Labelings</th><th>Notes</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
-    ${members.length > 10 ? `<p style="padding:0.75rem;font-family:var(--mono);font-size:0.72rem;color:var(--ink-light)">Showing all ${members.length} labeled matrices.</p>` : ''}
+    <p style="padding:0.75rem;font-family:var(--mono);font-size:0.72rem;color:var(--ink-light)">${members.length} distinct quiver${members.length === 1 ? '' : 's'} · ${labeledTotal} labeled exchange matrices${data.is_open ? ' explored so far (open class)' : ''}.</p>
   `;
 }
 
