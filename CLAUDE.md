@@ -6,9 +6,9 @@ This is research infrastructure: treat the public API as versioned-by-
 politeness (keep response shapes stable), and keep CC-BY-4.0 attribution
 intact.
 
-The Cloudflare migration (Neon/Postgres + Render/FastAPI → Workers + D1) is
-**complete**; the legacy stack lives only in git history. This file describes
-the current system.
+The whole system runs on Cloudflare (one Worker + one D1 database); the
+earlier hosting stack was decommissioned in August 2026 and survives only in
+git history. This file describes the current system.
 
 ## Architecture
 

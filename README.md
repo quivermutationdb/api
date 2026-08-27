@@ -16,10 +16,10 @@ src/
 ├── index.ts         # Worker entry point (Hono app + assets fallthrough)
 ├── api/index.ts     # API routes, mounted at /api
 └── db/
-    ├── schema.ts    # Drizzle schema (D1/SQLite mirror of the Postgres schema)
+    ├── schema.ts    # Drizzle schema for D1 (SQLite)
     └── shard.ts     # shardFor(n) — the single DB routing seam
 drizzle/             # Generated SQL migrations (wrangler d1 migrations apply)
-public/              # Static frontend (placeholder until the website repo is folded in)
+public/              # Static frontend, served as Workers Static Assets
 wrangler.jsonc       # Worker + D1 + Static Assets config
 ```
 

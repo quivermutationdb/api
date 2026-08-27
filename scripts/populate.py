@@ -16,8 +16,8 @@ Usage:
     python scripts/populate.py --export-d1 dist/d1                # n<=4, bound=2
     python scripts/populate.py --export-d1 dist/d1 --ranks 4 --force
 
-(The former Postgres write mode was removed with the Neon/Render
-decommission; regenerate + re-import into D1 instead.)
+(The former direct-to-database write mode was removed in the Cloudflare
+migration; regenerate + re-import into D1 instead.)
 """
 
 import argparse

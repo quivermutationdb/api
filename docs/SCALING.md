@@ -65,7 +65,8 @@ a silent permutation fallback. At n=10 the fallback is unusable, so:
 - Pin `pynauty` in `requirements.txt`.
 - Make the backend non-silent at scale: fail loudly (or refuse to populate) if
   `active_backend() != "nauty"` when `max_vertices > 6`.
-- Verify pynauty actually builds on Render (it has a C extension / nauty dep).
+- Verify pynauty actually builds on whatever box runs generation (it has a C
+  extension / nauty dep); generation never runs on Cloudflare.
 
 ### 1c. `core.canonical_class_rep` — O(class_size · n!)
 `min(_apply_permutation(m, perm) for m in labeled for perm in permutations(n))`.
