@@ -1,52 +1,95 @@
-# QMD — Cloudflare Migration Brief
+# QMD — Quiver Mutation Database
 
-This repo is the backend of the **Quiver Mutation Database** (https://www.quivermutationdb.org), a curated, citable database of quivers, exchange matrices, and mutation-equivalence classes. We are migrating the backend from **Neon (Postgres) + Render (FastAPI)** to **Cloudflare (Workers + D1)**. This document is the authoritative spec: follow it before improvising, and prefer current Cloudflare docs (via the Cloudflare skill / docs MCP) over pre-trained knowledge for any tooling or config detail.
+Backend + frontend of https://www.quivermutationdb.org — a curated, citable
+database of quivers, exchange matrices, and mutation-equivalence classes.
+This is research infrastructure: treat the public API as versioned-by-
+politeness (keep response shapes stable), and keep CC-BY-4.0 attribution
+intact.
 
-## Target architecture (settled — do not relitigate)
+The Cloudflare migration (Neon/Postgres + Render/FastAPI → Workers + D1) is
+**complete**; the legacy stack lives only in git history. This file describes
+the current system.
 
-- **One Cloudflare Worker** serves both the API (mounted at `/api/*`) and the static frontend (Workers Static Assets). Same origin, no CORS.
-- **API in TypeScript**: Hono for routing, Drizzle ORM with the D1 adapter, Drizzle migrations (replacing Alembic).
-- **One D1 database** for now (data is small: ranks 1–4). Design for later **per-`n` sharding**:
-  - All DB access goes through a single routing seam, e.g. `shardFor(n: number): D1Database`, which today returns the one bound DB for every `n`.
-  - IDs already encode `n` (`Q.n4.{sha256[:16]}`, `MC.n4.{sha256[:16]}`), so point lookups can always be routed by parsing the ID prefix.
-  - Keep search/browse tables **skinny** (IDs + invariant columns only, matrices referenced not inlined) so they can later serve as a global index DB while matrix payloads move into per-`n` shards.
-- **The Python math pipeline stays Python and stays offline.** `qmd/core.py` (mutation, canonical hashing, BFS generation) never runs on Cloudflare. `scripts/ingest.py` gains an export mode that emits SQL for `wrangler d1 import` (or hits the D1 REST API) instead of writing to Postgres.
-- **Generation will run on cloud compute** (full-database computation exceeds the maintainer's laptop), so the export mode must produce self-contained artifacts, not assume a local wrangler session: emit **one SQL/SQLite file per `n`** (this pre-aligns ingest with the future per-`n` shards), make generation resumable/checkpointable, and treat the per-`n` files as the hand-off between the compute environment and `wrangler d1 import` (which can run from the cloud box with the scoped API token, or from the laptop after downloading the artifacts).
-- **No Postgres, no Hyperdrive, no Containers** in the target state. Neon and Render are decommissioned at the end (human-approved step).
+## Architecture
 
-## Data model (mirror the existing Postgres schema; confirm against `alembic/` and `scripts/ingest.py`)
+- **One Cloudflare Worker** (`qmd`, wrangler.jsonc) serves both the API
+  (mounted at `/api/*`; Hono + Drizzle over D1) and the static frontend
+  (Workers Static Assets from `public/`). Same origin, no CORS. Production
+  hostnames: quivermutationdb.org + www (Custom Domains, declared in
+  wrangler.jsonc `routes`).
+- **One D1 database** (`qmd`, bound as `DB`). All DB access goes through the
+  routing seam `shardFor(n)` in `src/db/shard.ts` — today it returns the one
+  bound DB; future per-`n` shards change only that module. IDs encode the
+  rank (`Q.n4.{sha256[:16]}`, `MC.n4.{sha256[:16]}`), so point lookups route
+  by prefix.
+- **Schema** (`src/db/schema.ts`, migrations in `drizzle/`): skinny browse
+  tables `quivers` and `mutation_classes` (every filterable column indexed,
+  composite `(n, id)` for the default sort — `n` first, then id); heavy orbit
+  JSON in `mutation_class_payloads`; ingest-time aggregates in `rank_stats`
+  (homepage stats and `/random/*` come from there — never scans, never
+  `ORDER BY RANDOM()`); `downloads` logs exports.
+- **The Python math pipeline stays Python and stays offline.** `qmd/core.py`
+  (mutation, canonical hashing, BFS generation) never runs on Cloudflare.
+  Keep the Worker lean: no heavy computation, no matrix math server-side —
+  e.g. a quiver's canonical matrix is *looked up* from the quivers table, not
+  recomputed. Rows are tiny; when in doubt, prefer an extra indexed column
+  over a query-time computation.
+- **Excel export is generated client-side** from CSV (`public/xlsx-lite.js`);
+  the Worker serves CSV only (`/api/export`, streamed from paginated reads).
 
-Core entities, with indexes on every filterable/sortable column:
+## Data pipeline (offline → D1)
 
-- `quivers`: `id` (PK, `Q.n{k}.{hash}`), `n` (int), `exchange_matrix` (JSON text, row-major), `mutation_class_id` (FK), per-quiver invariants.
-- `mutation_classes`: `id` (PK, `MC.n{k}.{hash}`), `n`, `class_size`, `is_open` (bool — mutation bound `|b_ij| ≤ 2` exceeded), invariants: `mutation_finite`, `acyclic`, `dynkin_type`, `representation_type`, `connectivity` — each with **provenance** fields (values on the site carry explicit provenance).
-- Aggregate/stats table(s) written at ingest time (distinct quiver count, labeled quiver count, per-rank counts) to serve the homepage stats without scans.
+```bash
+python scripts/populate.py --export-d1 dist/d1        # one SQL file per rank
+npx wrangler d1 execute qmd --remote --file=dist/d1/qmd-n4.sql   # per rank
+```
 
-Default sort order everywhere: `n` first, then ID. This makes cross-`n` pagination trivial (exhaust one `n`, cursor into the next) and matches the natural presentation order.
+Per-rank files are self-contained and idempotent (each replaces its rank's
+rows, including the rank_stats row). Generation is resumable: manifest.json
+tracks file hashes, and acyclicity-n{k}.json checkpoints feed the
+mutation-acyclicity subquiver fallback (which consumes lower-rank results —
+ranks must be produced in ascending order). See `qmd/d1_export.py`. This is
+designed to run on cloud compute for the future larger-rank generation
+(docs/SCALING.md is the phase-2 planning doc).
 
-## API endpoints (drive from what the live frontend calls; verify against the deployed site's network requests)
+## Development
 
-- `GET /api/stats` — homepage counts (from the aggregates table; edge-cacheable).
-- `GET /api/quivers` and `GET /api/classes` — browse: paginated, sortable, filterable by rank, Dynkin type, representation type, connectivity, `mutation_finite`, `acyclic`, `is_open`, class size ranges.
-- `GET /api/quivers/{id}`, `GET /api/classes/{id}` — detail (route by ID prefix through `shardFor`).
-- `GET /api/random/quiver`, `GET /api/random/class` — via stored counts + offset (no `ORDER BY RANDOM()` scans).
-- `GET /api/export.csv` — CSV export of any filtered cut, streamed from paginated reads. Excel export is generated client-side from CSV; do not build xlsx generation into the Worker.
-- Preserve existing response shapes where the frontend already expects them; otherwise keep JSON flat and stable (this is citable research infrastructure — treat the API as versioned-by-politeness).
+```bash
+npm install && npm run cf-typegen      # deps + generate Env types
+npm run db:migrate:local               # schema into local D1
+python scripts/populate.py --export-d1 dist/d1   # generate dataset
+for f in dist/d1/qmd-n*.sql; do npx wrangler d1 execute qmd --local --file=$f; done
+npm run dev                            # http://127.0.0.1:8787
+npm run typecheck
+npm run test:api                       # 40 API assertions against wrangler dev
+node scripts/browser-check.mjs         # Chromium end-to-end page checks
+python -m pytest tests/ -q; python tests/test_core.py   # math pipeline suite
+npm run deploy                         # production (needs CLOUDFLARE_API_TOKEN)
+```
 
-## Migration sequence
+Use a **scoped API token** (Workers + D1 edit on this account only); never a
+global key — this is a shared organizational Cloudflare account (ICARM).
 
-1. Scaffold the Worker project in this repo: `wrangler.jsonc`, Hono app, Drizzle schema + migrations, Static Assets config. TypeScript strict.
-2. Create the D1 database (name: `qmd`) in the organization's Cloudflare account; bind as `DB`.
-3. Add the export mode to `scripts/ingest.py` (Postgres writes → SQL file for `wrangler d1 import`). Regenerating from seeds and loading fresh is acceptable at current data size; a Neon dump is not required.
-4. Implement endpoints; test with `wrangler dev` against a locally imported dataset; port relevant tests from `tests/`.
-5. Fold the frontend into this repo: copy the static site from https://github.com/quivermutationdb/website into this project's assets directory (preserving its git history via `git subtree` if convenient, plain copy if not), switch its API base URL to same-origin `/api`, and leave a README pointer in the old `website` repo before archiving it (archiving is a human-approved step).
-6. Deploy to a workers.dev preview URL first. **Human-approved steps, never automatic:** pointing `quivermutationdb.org` DNS at the Worker, and decommissioning Render/Neon.
-7. Later (not now): enable D1 read replication via the Sessions API when traffic justifies it; introduce real per-`n` shards behind `shardFor` when any table's growth curve approaches D1's per-database limit.
+## Adding a new invariant / property
 
-## Constraints and conventions
+Keep these in sync:
 
-- Use a **scoped API token** (Workers + D1 edit on this account only); never a global key. This is a shared organizational account.
-- License is CC-BY-4.0; keep attribution intact.
-- Keep the Worker lean: no heavy computation, no matrix math server-side.
-- Rows are tiny; when in doubt, prefer an extra indexed column over a query-time computation.
-- Maintainer: Blake Jackson (jackson@icarm.io). When a product decision isn't covered here, ask rather than assume.
+1. `src/db/schema.ts` — add the column (+ index if filterable), then
+   `npm run db:generate` and apply the migration locally and remotely.
+2. `qmd/invariants.py` or `qmd/local_acyclicity.py` — compute it.
+3. `qmd/d1_export.py` — write it (build_rank_rows + the column list in
+   render_rank_sql); regenerate and re-import the dataset.
+4. Worker API — surface it: list/detail serializers in `src/api/quivers.ts`
+   / `src/api/classes.ts`, and `EXPORT_COLUMNS` in `src/api/export.ts`.
+   Extend `scripts/api-smoke.mjs` to cover it.
+5. `public/` — show it on the quiver/class page and (optionally) as a
+   Browse/Search column; add a `<section id="...">` definition in
+   `public/wiki.html` (its section ids are the deep-link anchors every
+   property label points at).
+
+## Human-approved actions (never automatic)
+
+DNS changes on quivermutationdb.org, deleting or suspending external
+infrastructure, and archiving repositories. When a product decision isn't
+covered here, ask the maintainer rather than assume:
+Blake Jackson (jackson@icarm.io).

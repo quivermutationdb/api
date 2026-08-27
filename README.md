@@ -2,10 +2,9 @@
 
 Backend for the [Quiver Mutation Database](https://quivermutationdb.org).
 
-> **Migration in progress:** the backend is moving from Neon (Postgres) +
-> Render (FastAPI) to Cloudflare (Workers + D1). See `CLAUDE.md` for the
-> migration brief. The Python math pipeline (`qmd/`) stays Python and runs
-> offline; only serving moves to the Worker.
+One Cloudflare Worker serves the site and the API (same origin, `/api/*`),
+backed by a D1 database. The Python math pipeline (`qmd/`) runs offline and
+exports SQL for D1. See `CLAUDE.md` for the architecture guide.
 
 ## Cloudflare Worker
 
@@ -47,24 +46,20 @@ done
 ## Structure
 
 ```
-api/
-├── qmd/
-│   ├── core.py          # Matrix types, mutation, ID generation, BFS explorer
-│   └── __init__.py
-├── app/                 # FastAPI app (coming soon)
-│   ├── main.py
-│   ├── database.py
-│   ├── models.py
-│   ├── schemas.py
-│   └── routers/
-├── data/
-│   └── seeds/           # Existing seed data (JSON)
-├── scripts/
-│   └── ingest.py        # Load seed data into PostgreSQL
-├── tests/
-│   └── test_core.py     # Full test suite for core.py
-├── requirements.txt
-└── README.md
+qmd/                     # Offline math pipeline (pure Python, stdlib only)
+├── core.py              # Matrix types, mutation, ID generation, BFS explorer
+├── canonicalize.py      # Canonical forms
+├── invariants.py        # Per-quiver invariants
+├── local_acyclicity.py  # Banff / Louise / p-prime searches
+├── dynkin.py            # Dynkin classification
+├── class_properties.py  # Per-class property resolution (shared logic)
+└── d1_export.py         # GenerationResult -> per-rank SQL for D1
+scripts/
+├── populate.py          # Generate + export the dataset (one SQL file per rank)
+├── api-smoke.mjs        # API assertions against wrangler dev
+└── browser-check.mjs    # Chromium end-to-end page checks
+tests/
+└── test_core.py         # Math pipeline test suite
 ```
 
 ## Identifiers
@@ -89,7 +84,7 @@ api/
 
 ```bash
 python -m venv venv && source venv/bin/activate
-pip install -r requirements.txt
+pip install -r requirements.txt   # pytest only; the pipeline is stdlib-pure
 
 # Run the generation pipeline
 python -c "

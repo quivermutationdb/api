@@ -112,11 +112,10 @@ Fix requires a **node/time cap with a sound third state**:
 `not is_open → finite`. A "truncated/unknown finiteness" state has no representation.
 The finiteness trichotomy columns exist (`is_finite_confirmed`,
 `is_infinite_confirmed`, `is_infinite_expected`) but `is_open` is still the load-
-bearing flag in `_class_size`, `class_is_mutation_acyclic`, `dynkin.classify` gating,
-and `_la_bounds`. Plumb a genuine three-state finiteness before raising the bound.
+bearing flag in the API's class_size serialization (null = ∞), `class_is_mutation_acyclic`, `dynkin.classify` gating, and `class_properties.la_bounds`. Plumb a genuine three-state finiteness before raising the bound.
 
 ### 2c. Mutation-acyclic subquiver fallback depends on catalog completeness
-`crud._resolve_mutation_acyclic` / `_has_known_non_ma_subquiver` upgrade
+`class_properties.resolve_mutation_acyclic` / `_has_known_non_ma_subquiver` upgrade
 unknown → False when a member has an induced (n−1)-subquiver already known
 not-mutation-acyclic, processed in ascending rank order. This is sound **only if the
 lower-rank subquivers are present in the same generation run.** With *targeted*
@@ -144,7 +143,7 @@ set (Markov, etc.) explicitly. Re-verify `Q.n4.128d2df494351df3` stays False.
   which is documented as finite-only).
 
 ### 3b. `local_acyclicity.py` — Banff/Louise/P′ budgets
-`_la_bounds`: closed → depth 64, timeout 15s; open → depth 8, timeout 3s. The
+`class_properties.la_bounds`: closed → depth 64, timeout 15s; open → depth 8, timeout 3s. The
 source-deletion recursion is roughly exponential in rank (it recurses on Q∖{k},
 Q∖{j}, Q∖{k,j} and BFS-searches each). At rank 8–10 over classes with 10⁴–10⁵
 members, most calls will **time out → "unknown"**. That's *sound* (unknown, not
@@ -183,10 +182,11 @@ Browse/Search page is a full scan.
 ### 3e. Export path — unbounded materialization
 `export_rows` does `query....all()` with **no pagination** and builds the full list
 in memory, and the `labelings` scope multiplies rows by class size. A "download
-everything" at n=10 could be millions of rows → OOM / request timeout on Render.
-Needs streaming (server-side cursor / chunked CSV) and likely an async/offline export
-for the big cuts. `exporters.to_xlsx_bytes` (openpyxl) is especially memory-heavy —
-cap XLSX row count and steer large cuts to CSV.
+everything" at n=10 could be millions of rows. The Worker's /api/export already
+streams CSV from paginated reads and XLSX is generated client-side, so the serving
+side is covered — but the *ingest* export (qmd/d1_export.py) still renders each
+rank's SQL in memory; at n=10 the per-rank labeled orbits will need chunked/streamed
+SQL emission and probably per-class files within a rank.
 
 ### 3f. Gluing phase memory
 `run_generation` holds **all** raw orbits in memory at once plus the `qid_to_orbits`

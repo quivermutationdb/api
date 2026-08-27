@@ -1,8 +1,8 @@
 /**
  * Quiver listing machinery + /quivers routes.
  *
- * The list envelope and item shapes mirror the FastAPI backend exactly
- * (qmd/schemas.py, qmd/crud.py): the frontend's contract is qmd_id,
+ * The list envelope and item shapes mirror the legacy FastAPI backend
+ * exactly (git history: qmd/schemas.py, qmd/crud.py): the contract is qmd_id,
  * num_vertices, exchange_matrix, class_size (null => rendered as ∞), ...
  * The same filter set serves /quivers, /search, and /export.
  */
@@ -71,7 +71,7 @@ export function parseFilters(get: (k: string) => string | undefined): ListFilter
   };
 }
 
-/** WHERE conditions matching qmd/crud._filtered_quivers. */
+/** WHERE conditions matching the legacy backend's _filtered_quivers. */
 export function filterConditions(f: ListFilters): SQL[] {
   const conds: SQL[] = [];
   if (f.rank !== undefined) conds.push(eq(q.n, f.rank));
@@ -94,7 +94,7 @@ export function filterConditions(f: ListFilters): SQL[] {
   return conds;
 }
 
-// Frontend sort keys -> columns (qmd/crud._SORT_COLUMNS).
+// Frontend sort keys -> columns (legacy _SORT_COLUMNS).
 const SORT_COLUMNS = {
   qmd_id: q.id,
   num_vertices: q.n,
@@ -310,7 +310,7 @@ quiversRoutes.get("/:id", async (c) => {
     .where(eq(q.id, id)))[0];
   if (!row) return c.json({ detail: "Quiver not found" }, 404);
 
-  // Shape: qmd/schemas.QuiverDetail via crud.get_quiver_detail.
+  // Shape: the legacy QuiverDetail response, field for field.
   return c.json({
     qmd_id: row.id,
     label: row.mcLabel,

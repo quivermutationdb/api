@@ -2,7 +2,8 @@
  * GET /export — CSV export of any filtered cut, streamed from paginated
  * reads, matching the Python exporter byte format (UTF-8 BOM, CRLF,
  * TRUE/FALSE booleans, empty cell for null) and column order
- * (qmd/crud.EXPORT_COLUMNS) so downloads stay diffable across the migration.
+ * (the legacy backend's EXPORT_COLUMNS) so downloads stay diffable across
+ * the migration.
  *
  * Excel is generated client-side from CSV (see the frontend's download.js);
  * format=xlsx is rejected here by design.
@@ -73,7 +74,7 @@ function fetchPage(db: Database, filters: ListFilters, offset: number) {
     .offset(offset).limit(PAGE);
 }
 
-/** Flat export dict for one quiver + its class statistics (crud._export_row). */
+/** Flat export dict for one quiver + its class statistics (legacy _export_row). */
 function exportRow(r: ExportRow, matrix?: unknown): Record<string, unknown> {
   return {
     qmd_id: r.id,

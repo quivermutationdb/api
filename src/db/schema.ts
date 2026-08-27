@@ -1,7 +1,8 @@
 /**
  * Drizzle schema for the QMD D1 database.
  *
- * Mirrors the Postgres schema (qmd/models.py + alembic/) with the naming from
+ * Mirrors the legacy Postgres schema (git history: qmd/models.py + alembic/),
+ * with the naming from
  * the migration brief: `id`, `n`, `exchange_matrix`, `mutation_class_id`,
  * `class_size`. Adapted to SQLite: booleans are INTEGER 0/1, JSON is TEXT.
  *

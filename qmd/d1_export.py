@@ -24,7 +24,8 @@ Design points (see CLAUDE.md):
 - No database driver required.  This module (and everything it imports) is
   pure Python — it runs on a bare cloud compute box with just the repo.
 
-The row shapes mirror qmd/crud.upsert_generation_result exactly, targeting the
+The row shapes mirror the legacy Postgres writer (qmd/crud.py's
+upsert_generation_result, removed post-migration; see git history) against the
 Drizzle schema in src/db/schema.ts (see drizzle/0000_init_schema.sql).
 """
 
@@ -52,7 +53,7 @@ MANIFEST_NAME = "manifest.json"
 
 
 # ---------------------------------------------------------------------------
-# Row building (mirror of crud.upsert_generation_result, minus the ORM)
+# Row building (mirrors the legacy upsert_generation_result, minus the ORM)
 # ---------------------------------------------------------------------------
 
 def build_rank_rows(result: GenerationResult, n: int,

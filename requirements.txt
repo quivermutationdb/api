@@ -1,8 +1,4 @@
-fastapi>=0.110.0
-uvicorn[standard]>=0.29.0
-sqlalchemy>=2.0.0
-psycopg2-binary>=2.9.9
-python-dotenv>=1.0.0
+# The math pipeline (qmd/) is pure standard-library Python; pytest is the
+# only dependency, for the test suite. Serving is the Cloudflare Worker
+# (see package.json / wrangler.jsonc).
 pytest>=8.0.0
-alembic>=1.13.0
-openpyxl>=3.1.0

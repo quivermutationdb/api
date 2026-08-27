@@ -1,7 +1,8 @@
 /**
  * Mutation-class routes: browse list + detail.
  *
- * The detail shape mirrors qmd/schemas.ClassDetail via crud.get_class_detail.
+ * The detail shape mirrors the legacy FastAPI backend's ClassDetail (see git
+ * history: qmd/schemas.py, qmd/crud.py) — the frontend's contract.
  * distinct_quivers collapses the labeled orbit to one entry per unlabeled
  * quiver; each entry's matrix is the quiver's *canonical form*, which in the
  * Python backend was recomputed with canonical_form() — here it is looked up
@@ -115,7 +116,7 @@ classesRoutes.get("/:id", async (c) => {
   const labeled = payload?.labeledQuivers ?? [];
 
   // Collapse the labeled orbit to one entry per distinct unlabeled quiver,
-  // in first-appearance order (crud._distinct_quivers).
+  // in first-appearance order (as the legacy backend did).
   const groups = new Map<string, { count: number; fallback: Matrix }>();
   for (const e of labeled) {
     const g = groups.get(e.qmd_id);
@@ -145,7 +146,7 @@ classesRoutes.get("/:id", async (c) => {
     || b.labeling_count - a.labeling_count
     || (a.qmd_id < b.qmd_id ? -1 : a.qmd_id > b.qmd_id ? 1 : 0));
 
-  // Shape: qmd/schemas.ClassDetail via crud.get_class_detail.
+  // Shape: the legacy ClassDetail response, field for field.
   return c.json({
     mc_id: row.id,
     label: row.label,

@@ -1,10 +1,10 @@
 """
 qmd/class_properties.py
 
-Pure (database-free) resolution of per-class properties, shared by the
-Postgres write path (qmd/crud.py) and the D1 export path (qmd/d1_export.py).
-Keeping this module free of SQLAlchemy lets the export mode run on a bare
-generation box with no database driver installed.
+Pure (database-free) resolution of per-class properties, used by the D1
+export path (qmd/d1_export.py). Extracted from the legacy Postgres writer
+(qmd/crud.py, removed post-migration) so generation runs on a bare box with
+no database driver installed.
 """
 
 from __future__ import annotations

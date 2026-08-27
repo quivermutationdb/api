@@ -1,11 +1,11 @@
 /**
  * API router, mounted at /api by src/index.ts.
  *
- * Routes and response shapes are driven by what the live frontend calls
+ * Routes and response shapes are driven by what the frontend calls
  * (browse.html, search.html, quiver.html, class.html, index.html,
- * download.js in the website repo) and mirror the FastAPI backend
- * (main.py + qmd/schemas.py): /quivers, /quivers/{id}, /search,
- * /classes/{id}, /export.  New, brief-mandated additions: /stats,
+ * download.js in public/) and mirror the legacy FastAPI backend (git
+ * history: main.py + qmd/schemas.py): /quivers, /quivers/{id}, /search,
+ * /classes/{id}, /export.  Added in the migration: /stats,
  * /classes (browse), /random/quiver, /random/class, /export.csv.
  */
 
