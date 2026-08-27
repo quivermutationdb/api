@@ -272,6 +272,10 @@ def build_rank_rows(result: GenerationResult, n: int,
     for qid in sorted(all_matrices):
         matrix = all_matrices[qid]
         qi = qinv[qid]
+        if not is_connected(matrix):
+            # Cannot happen (seeds are connected and mutation preserves
+            # connectedness) — but the census guarantee is worth a hard stop.
+            raise RuntimeError(f"disconnected quiver {qid} reached the exporter")
         if qid in quivers:
             mc_id = result.membership.get(qid)
             finite = finite_by_class.get(mc_id) if mc_id else None
@@ -562,11 +566,15 @@ def _curated_seeds(n: int, log) -> list:
     from qmd.core import canonical_form, to_matrix
     path = os.path.join(os.path.dirname(__file__), "..", "data", "seeds.json")
     doc = _load_json(path) or {}
+    from qmd.core import is_connected
     out = []
     for e in doc.get("seeds", []):
         m = to_matrix(e["matrix"])
-        if len(m) == n:
-            out.append(canonical_form(m))
+        if len(m) != n:
+            continue
+        if not is_connected(m):
+            raise SystemExit(f"data/seeds.json: {e.get('name', '?')} is disconnected; the census is connected-only")
+        out.append(canonical_form(m))
     if out:
         log(f"    {len(out)} curated seed(s) from data/seeds.json")
     return out

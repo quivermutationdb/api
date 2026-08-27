@@ -7,6 +7,7 @@
 # The Worker must be deployed AFTER the data: new code expects schema v2.
 set -euo pipefail
 DIR=${1:?usage: release-data.sh DIR}
+echo "== 0/4 verify export (connected-only guarantee)"; python3 scripts/verify-export.py "$DIR"
 echo "== 1/4 migrations"; npm run db:migrate:remote
 echo "== 2/4 rank data";  scripts/import-d1.sh "$DIR" --remote
 echo "== 3/4 nicknames";  python3 scripts/nicknames.py --sql "$DIR/nicknames.sql"

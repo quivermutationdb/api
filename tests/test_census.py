@@ -149,3 +149,18 @@ def test_bigcell_pipeline_matches_normal_pipeline(tmp_path):
     cb = {r[0] for r in b.execute("SELECT id FROM mutation_classes")}
     assert ca == cb                                   # sample = whole cell -> identical classes
     assert a.execute("SELECT count(*) FROM labelings").fetchone()[0] == b.execute("SELECT count(*) FROM labelings").fetchone()[0]
+
+
+def test_curated_seeds_are_connected():
+    import json
+    doc = json.load(open(os.path.join(os.path.dirname(__file__), "..", "data", "seeds.json")))
+    for e in doc["seeds"]:
+        assert is_connected(to_matrix(e["matrix"])), e["name"]
+
+
+def test_exporter_refuses_disconnected_quivers():
+    """A disconnected quiver can only reach the exporter through a bug; it must stop the export."""
+    from qmd import d1_export
+    r = run_generation(max_vertices=3, bound=2, ranks=[3], seeds=[to_matrix([[0, 1, 0], [-1, 0, 0], [0, 0, 0]])])
+    with pytest.raises(RuntimeError, match="disconnected"):
+        d1_export.build_rank_rows(r, 3, known_acyclicity={}, bound=2)

@@ -256,6 +256,9 @@ def stage_sample(con, n: int, k: int, node_cap: int, workers: int, seed: int, la
 # ---------------------------------------------------------------------------
 
 def _quiver_rows(con, n: int) -> Iterator[dict]:
+    bad = con.execute("SELECT count(*) FROM quivers WHERE is_connected = 0").fetchone()[0]
+    if bad:
+        raise RuntimeError(f"{bad} disconnected quivers in the scratch table; the census is connected-only")
     cur = con.execute("SELECT id, upper, mutation_class_id, mutation_finite, max_edge, is_acyclic, is_connected, "
                       "is_bipartite, is_abundant, is_planar, labeling_count, representation_type, symmetry_group "
                       "FROM quivers ORDER BY id")

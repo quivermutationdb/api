@@ -13,7 +13,7 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from qmd import d1_export  # noqa: E402
-from qmd.core import run_generation, to_matrix  # noqa: E402
+from qmd.core import is_connected, run_generation, to_matrix  # noqa: E402
 from qmd.encoding import decode_upper, encode_upper  # noqa: E402
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
@@ -65,11 +65,17 @@ def test_shard_routing_matches_config():
     assert d1_export.shard_of("Q.n6.fabc000000000000", 6)[0] == "n6.1"   # 15 % 2
 
 
+def _gen(n, **kw):
+    """run_generation over the CONNECTED seeds of (n, 2), as the exporter does."""
+    from qmd.census import census_seeds
+    return run_generation(max_vertices=n, bound=2, ranks=[n], seeds=census_seeds(n, 2), **kw)
+
+
 @pytest.fixture(scope="module")
 def rank_rows():
     out, known = {}, {}
     for n in (1, 2, 3):
-        r = run_generation(max_vertices=n, bound=2, ranks=[n])
+        r = _gen(n)
         rows = d1_export.build_rank_rows(r, n, known_acyclicity=known, bound=2)
         known.update(rows["acyclicity_by_qid"])
         out[n] = rows
@@ -114,7 +120,7 @@ def test_rank_sql_is_idempotent_and_consistent(rank_sql):
         assert qc == con.execute("SELECT count(*) FROM quivers WHERE n=?", (n,)).fetchone()[0]
         assert cc == con.execute("SELECT count(*) FROM mutation_classes WHERE n=?", (n,)).fetchone()[0]
         assert lc == con.execute("SELECT sum(labeling_count) FROM quivers WHERE n=? AND mutation_class_id IS NOT NULL", (n,)).fetchone()[0]
-    assert con.execute("SELECT quiver_count FROM rank_stats WHERE n = 3").fetchone()[0] == 25   # brute (all) seeds via run_generation
+    assert con.execute("SELECT quiver_count FROM rank_stats WHERE n = 3").fetchone()[0] == 22   # connected rank-3 quivers
     # labelings exist exactly for complete classes, dense ords, matching class_size
     bad = con.execute("""
         SELECT m.id FROM mutation_classes m LEFT JOIN
@@ -133,6 +139,10 @@ def test_rank_sql_is_idempotent_and_consistent(rank_sql):
         WHERE (m.is_finite_confirmed = 1 AND q.mutation_finite IS NOT 1)
            OR (m.is_infinite_confirmed = 1 AND q.mutation_finite IS NOT 0)""").fetchall()
     assert mism == []
+    # connected-only guarantee: every stored quiver and every stored labeling is connected
+    for n, enc in con.execute("SELECT n, exchange_matrix FROM quivers").fetchall():
+        assert is_connected(decode_upper(n, enc))
+    assert con.execute("SELECT count(*) FROM quivers WHERE is_connected = 0").fetchone()[0] == 0
     # rows are inserted in id order, so (n, rowid) is id order (rowid-based keyset relies on it)
     ids = con.execute("SELECT id FROM quivers ORDER BY n, rowid").fetchall()
     assert ids == sorted(ids, key=lambda r: (int(r[0].split(".")[1][1:]), r[0]))
@@ -196,7 +206,7 @@ def test_split_rank_parts_go_to_their_shards(rank_rows):
         con_a.executescript(by_shard["n3.0"]); con_b.executescript(by_shard["n3.1"])
         qa = {r[0] for r in con_a.execute("SELECT id FROM quivers")}
         qb = {r[0] for r in con_b.execute("SELECT id FROM quivers")}
-        assert qa.isdisjoint(qb) and len(qa | qb) == 25
+        assert qa.isdisjoint(qb) and len(qa | qb) == 22
         assert all(int(i.split(".")[2][0], 16) % 2 == 0 for i in qa)
         # classes and their labelings travel together
         for con in (con_a, con_b):
@@ -221,7 +231,7 @@ def test_export_ranks_resume_invalidates_dependents(tmp_path):
 
 
 def test_truncated_class_is_never_finite():
-    r = run_generation(max_vertices=3, bound=2, ranks=[3], node_cap=3)
+    r = _gen(3, node_cap=3)
     rows = d1_export.build_rank_rows(r, 3, known_acyclicity={}, bound=2, node_cap=3)
     truncated = [c for c in rows["mutation_classes"] if c["exploration"] == "truncated"]
     assert truncated, "node cap 3 must truncate some rank-3 class"
