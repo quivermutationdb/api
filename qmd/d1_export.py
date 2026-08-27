@@ -85,9 +85,41 @@ def _finiteness(mc: MutationClassResult, n: int, bound: int) -> tuple:
     }
 
 
+def _class_job(args: tuple) -> tuple:
+    """Worker: the per-class searches that only need the canonical rep."""
+    mc_id, rep, is_open, complete = args
+    dtype = dynkin.classify(rep) if complete else None
+    bounds = la_bounds(is_open)
+    return (mc_id, dtype,
+            la.banff_status(rep, **bounds),
+            la.louise_status(rep, **bounds),
+            la.p_prime_status(rep, **bounds))
+
+
+def _quiver_job(args: tuple) -> tuple:
+    qid, matrix = args
+    return qid, invariants.quiver_invariants(matrix)
+
+
+def _pmap(fn, jobs: list, workers: int, progress=None, label: str = ""):
+    """Ordered results from a process pool (or inline when workers <= 1)."""
+    if workers <= 1 or len(jobs) < 2:
+        return [fn(j) for j in jobs]
+    import multiprocessing as mp
+    out = []
+    with mp.get_context("fork").Pool(workers) as pool:
+        for i, r in enumerate(pool.imap(fn, jobs, chunksize=16), 1):
+            out.append(r)
+            if progress and (i % 500 == 0 or i == len(jobs)):
+                progress(label, i, len(jobs))
+    return out
+
+
 def build_rank_rows(result: GenerationResult, n: int,
                     known_acyclicity: Optional[dict] = None, *,
-                    bound: int = 2, node_cap: Optional[int] = None) -> dict:
+                    bound: int = 2, node_cap: Optional[int] = None,
+                    generator: str = "brute", census_size: Optional[int] = None,
+                    workers: int = 1, progress=None) -> dict:
     """
     Compute the skinny rows for rank `n` and keep handles to the class objects
     so the heavy per-class rows (labelings, frontier) can be streamed later.
@@ -117,18 +149,17 @@ def build_rank_rows(result: GenerationResult, n: int,
         known=known_acyclicity,
     )
 
+    ordered = sorted(classes)
+    searched = _pmap(_class_job, [
+        (mc_id, classes[mc_id].canonical_rep, classes[mc_id].is_open,
+         classes[mc_id].exploration == "complete") for mc_id in ordered
+    ], workers, progress, "classes")
+
     class_rows: list[dict] = []
-    for mc_id in sorted(classes):
+    for mc_id, dtype, (b_state, b_w), (l_state, l_w), (p_state, p_w) in searched:
         mc = classes[mc_id]
         rep = mc.canonical_rep
         is_open = mc.is_open
-        complete = mc.exploration == "complete"
-        dtype = dynkin.classify(rep) if complete else None
-
-        bounds = la_bounds(is_open)
-        b_state, b_w = la.banff_status(rep, **bounds)
-        l_state, l_w = la.louise_status(rep, **bounds)
-        p_state, p_w = la.p_prime_status(rep, **bounds)
         fin, inf, exp, extra = _finiteness(mc, n, bound)
         provenance = {
             "is_banff":   {"state": b_state, "witness": b_w},
@@ -166,11 +197,14 @@ def build_rank_rows(result: GenerationResult, n: int,
         for qid in mc.quiver_ids:
             labeling_counts[qid] = labeling_counts.get(qid, 0) + 1
 
+    qinv = dict(_pmap(_quiver_job, [(qid, quivers[qid]) for qid in sorted(quivers)],
+                      workers, progress, "quivers"))
+
     quiver_rows: list[dict] = []
     offset = 0
     for qid in sorted(quivers):
         matrix = quivers[qid]
-        qi = invariants.quiver_invariants(matrix)
+        qi = qinv[qid]
         count = labeling_counts.get(qid, 1)
         quiver_rows.append({
             "id": qid,
@@ -199,6 +233,8 @@ def build_rank_rows(result: GenerationResult, n: int,
         "node_cap": node_cap,
         "generated_at": _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
         "pipeline_version": PIPELINE_VERSION,
+        "generator": generator,
+        "census_size": census_size,
     }
 
     acyclicity_by_qid = {
@@ -248,7 +284,8 @@ _QUIVER_COLUMNS = [
     "labeling_count", "labeling_offset", "representation_type", "symmetry_group",
 ]
 _STATS_COLUMNS = ["n", "quiver_count", "labeled_quiver_count", "class_count",
-                  "bound", "node_cap", "generated_at", "pipeline_version"]
+                  "bound", "node_cap", "generated_at", "pipeline_version",
+                  "generator", "census_size"]
 
 
 def _insert_stmts(table: str, columns: list[str], rows: Iterable,
@@ -416,10 +453,34 @@ def _remove_stale_parts(out_dir: str, n: int) -> None:
             os.remove(os.path.join(out_dir, name))
 
 
+def _seeds_for(n: int, bound: int, generator: str, sample: Optional[int],
+               sample_seed: int, workers: int, log) -> tuple[list, int]:
+    """Phase-1 seeds for a rank plus the exact size of the cell (n, bound)."""
+    from qmd import census
+    size = census.count_quivers(n, bound)
+    if generator == "brute":
+        from qmd.core import generate_seed_quivers
+        return generate_seed_quivers(n, bound, ranks=[n]), size
+    if generator == "orderly":
+        return census.census_seeds(
+            n, bound, workers=workers,
+            progress=lambda k, c: log(f"    orderly level {k}: {c} quivers")), size
+    if generator == "sample":
+        if not sample:
+            raise SystemExit("--sample N is required with --generator sample")
+        if sample >= size:
+            log(f"    sample {sample} >= cell size {size}; enumerating instead")
+            return census.census_seeds(n, bound, workers=workers), size
+        return census.sample_cell(n, bound, sample, seed=sample_seed), size
+    raise SystemExit(f"unknown generator {generator!r}")
+
+
 def export_ranks(out_dir: str, *, max_vertices: int, bound: int,
                  ranks: Optional[Iterable[int]] = None, force: bool = False,
                  node_cap: Optional[int] = None,
-                 part_bytes: int = DEFAULT_PART_BYTES, log=print) -> None:
+                 part_bytes: int = DEFAULT_PART_BYTES,
+                 generator: str = "orderly", sample: Optional[int] = None,
+                 sample_seed: int = 0, workers: int = 1, log=print) -> None:
     """
     Generate and export ranks 1..max_vertices (or the given `ranks`) as
     multipart SQL, checkpointed so an interrupted run resumes where it left off.
@@ -435,8 +496,9 @@ def export_ranks(out_dir: str, *, max_vertices: int, bound: int,
     manifest_path = os.path.join(out_dir, MANIFEST_NAME)
     manifest = _load_json(manifest_path) or {"bound": bound, "ranks": {}}
 
-    settings = {"bound": bound, "node_cap": node_cap}
-    if (manifest.get("bound"), manifest.get("node_cap")) != (bound, node_cap):
+    settings = {"bound": bound, "node_cap": node_cap, "generator": generator,
+                "sample": sample if generator == "sample" else None}
+    if any(manifest.get(k) != v for k, v in settings.items()):
         if manifest.get("ranks") and not force:
             raise SystemExit(
                 f"{manifest_path} was generated with bound={manifest.get('bound')}, "
@@ -474,9 +536,19 @@ def export_ranks(out_dir: str, *, max_vertices: int, bound: int,
             log(f"  rank {n}: export or its checkpoints changed, regenerating")
 
         log(f"  rank {n}: generating (bound |b_ij| <= {bound}"
-            f"{f', node cap {node_cap}' if node_cap else ''}) ...")
-        result = run_generation(max_vertices=n, bound=bound, ranks=[n], node_cap=node_cap)
-        rows = build_rank_rows(result, n, known_acyclicity=known, bound=bound, node_cap=node_cap)
+            f"{f', node cap {node_cap}' if node_cap else ''}, {generator}"
+            f"{f', {workers} workers' if workers > 1 else ''}) ...")
+        seeds, census_size = _seeds_for(n, bound, generator, sample, sample_seed, workers, log)
+        log(f"    {len(seeds)} seed quivers (cell size {census_size:,})")
+        def prog(stage, i, total):
+            if i == total or i % max(1, total // 10) == 0:
+                log(f"    {stage}: {i}/{total}")
+        result = run_generation(max_vertices=n, bound=bound, ranks=[n], node_cap=node_cap,
+                                seeds=seeds, workers=workers, progress=prog)
+        log(f"    {len(result.quivers)} quivers in {len(result.classes)} classes; computing invariants ...")
+        rows = build_rank_rows(result, n, known_acyclicity=known, bound=bound, node_cap=node_cap,
+                               generator=generator, census_size=census_size,
+                               workers=workers, progress=prog)
 
         _remove_stale_parts(out_dir, n)
         parts = write_rank_sql(out_dir, n, rows, bound=bound, part_bytes=part_bytes)
@@ -491,6 +563,8 @@ def export_ranks(out_dir: str, *, max_vertices: int, bound: int,
             "class_count": stats["class_count"],
             "truncated_classes": sum(
                 1 for r in rows["mutation_classes"] if r["exploration"] == "truncated"),
+            "generator": generator,
+            "census_size": census_size,
             "generated_at": stats["generated_at"],
         }
         _atomic_write(manifest_path, json.dumps(manifest, indent=2, sort_keys=True))

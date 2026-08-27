@@ -274,6 +274,9 @@ const json = async (path, s) => (await get(path, s)).json();
   check("lists are cacheable", (await get("/quivers?limit=1")).headers.get("cache-control") === "public, max-age=300");
   const st = await json("/stats");
   check("stats carry provenance", st.by_rank.every((r) => r.pipeline_version === "2.0.0" && r.bound === 2));
+  check("stats carry generator + exact census size", st.by_rank.every((r) => r.generator === "orderly")
+    && st.by_rank.find((r) => r.n === 4).census_size === 695
+    && st.by_rank.every((r) => r.distinct_quivers === r.census_size));
 }
 
 // ---- /export ---------------------------------------------------------------

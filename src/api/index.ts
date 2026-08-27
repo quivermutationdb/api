@@ -88,6 +88,8 @@ api.get("/stats", async (c) => {
       node_cap: r.nodeCap,
       generated_at: r.generatedAt,
       pipeline_version: r.pipelineVersion,
+      generator: r.generator,
+      census_size: r.censusSize,
     })),
   });
 });

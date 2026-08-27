@@ -321,9 +321,10 @@ class _RawOrbit:
     labeled_quivers : list[Matrix]
     quiver_ids      : list[str]       # parallel to labeled_quivers
     qid_set         : set[str]        # fast membership test
-    is_open         : bool            # hit the weight bound OR was truncated
+    is_open         : bool            # crossed the weight bound OR was truncated
     boundary_quivers: list[Matrix]
-    truncated       : bool = False    # stopped by the node cap (finiteness unknown)
+    truncated       : bool = False    # stopped by the node cap before any crossing
+    crossed         : bool = False    # some mutation crossed the weight bound
 
 
 def _bfs_orbit(seed: Matrix, bound: int = 2,
@@ -332,9 +333,12 @@ def _bfs_orbit(seed: Matrix, bound: int = 2,
     BFS over all matrices reachable from `seed` by bounded mutation.
     Returns the raw labeled orbit without any gluing.
 
-    `node_cap` bounds the number of labeled matrices visited. Reaching it sets
-    `truncated` (and `is_open`): the orbit is a *partial* exploration whose
-    finiteness is unknown — it must never be stored as a finite class.
+    `node_cap` bounds the number of labeled matrices visited. If the cap is
+    reached *without* any mutation having crossed the weight bound, the orbit
+    is `truncated`: a partial exploration whose finiteness is unknown — it
+    must never be stored as a finite class. If the bound was crossed before
+    (or after) the cap, `crossed` wins: the Derksen–Owen proof of infinitude
+    already happened, and the cap only limits how much of the class is kept.
     Matrices are returned in lex-sorted order so the orbit (and everything
     derived from it, e.g. `labelings.ord`) is deterministic.
     """
@@ -375,7 +379,8 @@ def _bfs_orbit(seed: Matrix, bound: int = 2,
         qid_set          = set(qids),
         is_open          = is_open or truncated,
         boundary_quivers = sorted(boundary),
-        truncated        = truncated,
+        truncated        = truncated and not is_open,
+        crossed          = is_open,
     )
 
 
@@ -456,10 +461,12 @@ def _merge_orbits(orbits: list[_RawOrbit]) -> MutationClassResult:
     merged_boundary : list[Matrix] = []
     is_open = False
     truncated = False
+    crossed = False
 
     for orbit in orbits:
         is_open = is_open or orbit.is_open
         truncated = truncated or orbit.truncated
+        crossed = crossed or orbit.crossed
         for m, qid in zip(orbit.labeled_quivers, orbit.quiver_ids):
             if m not in seen_labeled:
                 seen_labeled.add(m)
@@ -489,8 +496,10 @@ def _merge_orbits(orbits: list[_RawOrbit]) -> MutationClassResult:
         is_open            = is_open,
         boundary_quivers   = merged_boundary,
         merged_orbit_count = len(orbits),
-        exploration        = ("truncated" if truncated
-                              else "bound" if is_open else "complete"),
+        # A crossing proves infinitude whatever else happened; 'truncated'
+        # means the cap hit with no crossing anywhere in the glued class.
+        exploration        = ("bound" if crossed
+                              else "truncated" if truncated else "complete"),
     )
 
 
@@ -599,9 +608,18 @@ class GenerationResult:
         return self.closed_closed_merges + self.closed_open_merges + self.open_open_gluings
 
 
+def _bfs_one(args: tuple) -> tuple[str, _RawOrbit]:
+    """Worker: (seed qid, orbit) for one seed. Coverage is decided by the parent."""
+    seed, bound, node_cap = args
+    return quiver_id(seed), _bfs_orbit(seed, bound, node_cap)
+
+
 def run_generation(max_vertices: int = 4, bound: int = 2,
                    ranks: Optional[Iterable[int]] = None,
-                   node_cap: Optional[int] = None) -> GenerationResult:
+                   node_cap: Optional[int] = None,
+                   seeds: Optional[list[Matrix]] = None,
+                   workers: int = 1,
+                   progress=None) -> GenerationResult:
     """
     Full four-phase generation pipeline.
 
@@ -626,9 +644,19 @@ def run_generation(max_vertices: int = 4, bound: int = 2,
     `ranks` restricts the pipeline to the given vertex counts (see
     generate_seed_quivers); mutation preserves rank, so a per-rank run
     produces exactly the rank-n slice of the full run.
+
+    `seeds` overrides Phase 1 with an explicit seed list (e.g. from
+    qmd.census — orderly generation or a sample). `workers` > 1 runs Phase 2
+    in a process pool. Results are **identical** to the sequential run: the
+    workers explore every seed, and the parent replays the sequential rule
+    ("skip a seed whose quiver an earlier kept orbit already covers") in seed
+    order, discarding orbits that rule would never have computed. What is
+    explored for an open class therefore never depends on the worker count —
+    only on the (sorted) seed order — so published MC ids are stable.
     """
     result = GenerationResult()
-    seeds  = generate_seed_quivers(max_vertices, bound, ranks=ranks)
+    if seeds is None:
+        seeds = generate_seed_quivers(max_vertices, bound, ranks=ranks)
 
     # --- Phase 2: BFS ---
     # We run BFS for every seed whose quiver_id is not yet covered.
@@ -636,15 +664,30 @@ def run_generation(max_vertices: int = 4, bound: int = 2,
     # happened; a seed might be in a merged class but we need its orbit
     # to perform the merge.
     raw_orbits   : list[_RawOrbit] = []
-    covered_qids : set[str]        = set()  # qids seen in any orbit so far
+    covered_qids : set[str]        = set()  # qids seen in any kept orbit so far
 
-    for seed in seeds:
-        seed_qid = quiver_id(seed)
+    def keep(seed_qid: str, orbit: _RawOrbit) -> None:
         if seed_qid in covered_qids:
-            continue
-        orbit = _bfs_orbit(seed, bound, node_cap)
+            return
         raw_orbits.append(orbit)
         covered_qids.update(orbit.qid_set)
+
+    if workers > 1 and len(seeds) > 1:
+        import multiprocessing as mp
+        jobs = [(seed, bound, node_cap) for seed in seeds]
+        with mp.get_context("fork").Pool(workers) as pool:
+            # Ordered imap: the parent sees results in seed order, exactly as
+            # the sequential loop would, so the keep/skip decisions match.
+            for i, (seed_qid, orbit) in enumerate(pool.imap(_bfs_one, jobs, chunksize=32), 1):
+                keep(seed_qid, orbit)
+                if progress and (i % max(1, len(jobs) // 20) == 0 or i == len(jobs)):
+                    progress("bfs", i, len(jobs))
+    else:
+        for seed in seeds:
+            seed_qid = quiver_id(seed)
+            if seed_qid in covered_qids:
+                continue
+            keep(seed_qid, _bfs_orbit(seed, bound, node_cap))
 
     # --- Phase 3: Union-Find gluing ---
     n_orbits = len(raw_orbits)

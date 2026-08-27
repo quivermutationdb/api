@@ -276,6 +276,19 @@ def test_closed_class_is_mutation_closed(m):
             assert mu in orbit or not is_bounded(mu, 2)
 
 
+def test_node_cap_semantics():
+    """cap without a crossing -> truncated; cap after a crossing -> still bound."""
+    r = explore_mutation_class(D4, node_cap=10)
+    assert r.exploration == "truncated" and r.is_open and r.labeled_size == 10
+    # A class that crosses |b_ij| <= 2 quickly: Kronecker-ish rank-3 seed.
+    m = to_matrix([[0, 2, -1], [-2, 0, 2], [1, -2, 0]])
+    full = explore_mutation_class(m)
+    assert full.exploration == "bound"
+    capped = explore_mutation_class(m, node_cap=3)
+    assert capped.exploration == "bound", "a crossing proves infinitude; the cap must not hide it"
+    assert capped.labeled_size <= 3 + 1
+
+
 def test_open_class_has_boundary():
     res = explore_mutation_class(to_matrix([[0, 1, 1], [-1, 0, 1], [-1, -1, 0]]), bound=2)
     if res.is_open:

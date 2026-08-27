@@ -200,6 +200,10 @@ export const rankStats = sqliteTable("rank_stats", {
   nodeCap: integer("node_cap"),
   generatedAt: text("generated_at"),
   pipelineVersion: text("pipeline_version"),
+  /** 'orderly' (exact census) | 'brute' | 'sample'. */
+  generator: text("generator"),
+  /** Exact number of unlabeled quivers in the cell (n, bound) — Burnside count. */
+  censusSize: integer("census_size"),
 });
 
 // ---------------------------------------------------------------------------

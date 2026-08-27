@@ -50,9 +50,17 @@ git history. This file describes the current system.
 ## Data pipeline (offline → D1)
 
 ```bash
-python scripts/populate.py --export-d1 dist/d1 [--max-vertices N --bound B --node-cap C]
+python scripts/populate.py --count-only --max-vertices 10 --bound 2   # exact cell sizes first!
+python scripts/populate.py --export-d1 dist/d1 --max-vertices 5 --bound 2 --node-cap 500 --workers 8
+python scripts/populate.py --export-d1 dist/d1 --ranks 7 --bound 2 --generator sample --sample 200000 --node-cap 200
 scripts/import-d1.sh dist/d1 --remote          # parts in order, ranks ascending
 ```
+
+Seeds come from `qmd/census.py`: **orderly generation** (exact census of the
+cell (n, bound); parallel) or **sampling** for cells that are not finite jobs
+(see the size table in docs/PHASE2.md §1 — anything ≳ 10⁷ classes). Parallel
+runs are bit-identical to serial ones. Never raise `--node-cap` above what
+D1 can hold: labelings rows ≈ classes × cap.
 
 A rank is exported as ordered parts `qmd-n{k}.001.sql, .002.sql, …` (statements
 cut at 90 KB, parts at 64 MB — D1 limits); part 001 deletes the rank first, so

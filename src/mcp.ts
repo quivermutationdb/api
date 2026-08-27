@@ -59,7 +59,7 @@ export function createQmdServer(env: Env) {
       mutation_classes: rows.reduce((a, r) => a + r.classCount, 0),
       by_rank: rows.map((r) => ({ n: r.n, distinct_quivers: r.quiverCount, labeled_quivers: r.labeledQuiverCount,
         mutation_classes: r.classCount, bound: r.bound, node_cap: r.nodeCap, generated_at: r.generatedAt,
-        pipeline_version: r.pipelineVersion })),
+        pipeline_version: r.pipelineVersion, generator: r.generator, census_size: r.censusSize })),
     });
   });
 

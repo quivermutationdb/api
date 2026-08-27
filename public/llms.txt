@@ -22,8 +22,11 @@ Maintainer: Blake Jackson <jackson@icarm.io>
 
 ## Reading the data
 
-- `GET /api/stats` — totals and, per rank, how the data was generated
-  (weight bound, node cap, pipeline version, date).
+- `GET /api/stats` — totals and, per rank, how the data was generated:
+  weight bound, node cap, `generator` (`orderly` = exact census of the cell,
+  `sample` = uniform sample of labeled matrices, not uniform over isomorphism
+  classes), `census_size` (exact number of quivers in the cell), pipeline
+  version, date. Compare `distinct_quivers` with `census_size` for coverage.
 - `GET /api/quivers?rank=4&is_acyclic=true&limit=100` — filter/sort/page.
   Every list returns `next_cursor`; pass it back as `?cursor=` (opaque).
   `scope=labelings` gives one row per labeled exchange matrix.

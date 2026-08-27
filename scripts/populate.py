@@ -47,7 +47,28 @@ def main() -> None:
     parser.add_argument("--part-bytes", type=int, default=None,
                         help="Split each rank's SQL into parts of at most this "
                              "many bytes (default 64 MB).")
+    parser.add_argument("--generator", choices=["orderly", "brute", "sample"],
+                        default="orderly",
+                        help="Phase-1 seeds: orderly generation (exact census, "
+                             "default), brute-force enumeration (tiny cells), or "
+                             "a uniform sample of labeled matrices (--sample N).")
+    parser.add_argument("--sample", type=int, default=None,
+                        help="With --generator sample: number of distinct quivers "
+                             "to draw per rank.")
+    parser.add_argument("--sample-seed", type=int, default=0)
+    parser.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 2) - 2),
+                        help="Process-pool size for generation, BFS and invariants "
+                             "(default: CPUs - 2).")
+    parser.add_argument("--count-only", action="store_true",
+                        help="Print the exact cell sizes (Burnside) and exit.")
     args = parser.parse_args()
+
+    if args.count_only:
+        from qmd.census import count_quivers
+        ranks_ = [int(r) for r in args.ranks.split(",")] if args.ranks else range(1, args.max_vertices + 1)
+        for n in ranks_:
+            print(f"  n={n:<2} |b_ij|<={args.bound}: {count_quivers(n, args.bound):,} unlabeled quivers")
+        return
 
     from qmd.d1_export import export_ranks
     ranks = [int(r) for r in args.ranks.split(",")] if args.ranks else None
@@ -59,7 +80,9 @@ def main() -> None:
         kwargs["part_bytes"] = args.part_bytes
     export_ranks(args.export_d1, max_vertices=args.max_vertices,
                  bound=args.bound, ranks=ranks, force=args.force,
-                 node_cap=args.node_cap, **kwargs)
+                 node_cap=args.node_cap, generator=args.generator,
+                 sample=args.sample, sample_seed=args.sample_seed,
+                 workers=args.workers, **kwargs)
     print("Done.")
 
 

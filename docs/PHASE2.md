@@ -1,8 +1,6 @@
 # Phase 2 design: n ≤ 10, |b_ij| ≤ 10, agents, nicknames
 
-> Status: **implemented** (schema v2, pipeline, API, site) except the
-> generation-strategy question in §1, which is a mathematical decision for the
-> maintainer. `docs/SCALING.md` is the original audit; this file records what
+> Status: **implemented** (schema v2, pipeline, API, site, census generation). `docs/SCALING.md` is the original audit; this file records what
 > was decided and built.
 
 ## 0. What phase 2 has to survive
@@ -20,18 +18,46 @@ Aug 2026, and the sizes of the finite families):
 | Worker memory | 128 MB | never materialise an orbit in the Worker; stream everything |
 | D₁₀ / E₈ / A₁₀ orbits | 136,136 / 25,080 / 58,786 labeled | class members must be paginated in the API *and* the UI |
 
-## 1. Generation scope (maintainer decision — not made here)
+## 1. Generation scope — decided: bounded-height census where it is finite, sampling beyond
 
-"Rank 10, height 10" is two different jobs (SCALING §0):
+The maintainer wants a large ML dataset, i.e. a census over (n, h) cells rather
+than curated families. The exact cell sizes (Burnside over Sₙ,
+`qmd.census.count_quivers`, verified against brute force) are:
 
-1. **Targeted finite/affine families** to rank 10 — bounded, high value, weight ≤ 2.
-2. **Bounded-height census** for small n — needs orderly generation (SCALING §1a);
-   for rank ≥ 3, reaching |b_ij| ≥ 3 already proves mutation-infinite, so a
-   high bound only enlarges the *explored subset* of infinite classes.
+| n \ h | 1 | 2 | 3 | 4 | 5 | 10 |
+|---|---|---|---|---|---|---|
+| 3 | 7 | 25 | 63 | 129 | 231 | 1,561 |
+| 4 | 42 | 695 | 5,012 | 22,365 | 74,206 | 3,576,111 |
+| 5 | 582 | 82,880 | 2,364,495 | 29,102,787 | 2.2e8 | 1.4e11 |
+| 6 | 21,480 | 42,598,925 | 6.6e9 | 2.9e11 | 5.8e12 | 9.5e16 |
+| 7 | 2,142,288 | 9.5e10 | 1.1e14 | 2.2e16 | 1.5e18 | 1.2e24 |
+| 8 | 5.8e8 | 9.2e14 | 1.1e19 | 1.3e22 | 3.6e24 | 2.6e32 |
+| 10 | 8.2e14 | 7.8e24 | 3.0e31 | 2.4e36 | 2.0e40 | 8.7e52 |
 
-Everything below works for either. The pipeline now has a **node cap** with a
-sound third exploration state so an infinite class can never be stored as
-finite by accident, whichever scope is chosen.
+So a *census* is a finite job only for cells of roughly ≤ 10⁷ quivers:
+(4, h ≤ 10), (5, h ≤ 3), (6, h ≤ 2), (7, 1). Everything else — in particular
+every cell with n ≥ 7, h ≥ 2 — is only reachable by **sampling**. Both are
+supported by the same pipeline (`scripts/populate.py`):
+
+* `--generator orderly` (default): canonical augmentation (`qmd/census.py`),
+  exact, emits every class once, parallel over parents. (5, 2) takes ~25 s on
+  8 workers; (6, 2) is ~4×10⁷ classes and is a multi-hour job with a memory
+  plan of its own (SCALING §3f) — not run yet.
+* `--generator sample --sample N`: N distinct quivers from uniformly random
+  labeled matrices of the cell, canonicalised. Uniform over *labeled*
+  matrices, not over isomorphism classes (symmetric quivers under-represented)
+  — stated in `rank_stats.generator` and on `/api/stats` so ML users know.
+* `--node-cap C`: every class BFS stops at C labeled matrices. A class that
+  crossed the weight bound before that is still `bound` (proved infinite);
+  one that did not is `truncated` (finiteness unknown). This is what makes a
+  census of mostly-infinite classes storable.
+* `--workers W`: generation, BFS and per-class searches run in a process
+  pool. Results are bit-identical to a serial run (the parent replays the
+  sequential coverage rule), so published ids never depend on W.
+
+Per-rank provenance (`rank_stats`: bound, node cap, generator, exact
+`census_size`, pipeline version, date) tells a reader exactly what fraction of
+a cell a rank contains.
 
 ## 2. Storage: schema v2 (`drizzle/0001_phase2.sql`)
 
@@ -74,8 +100,8 @@ finite by accident, whichever scope is chosen.
   consumed, so regenerating rank k invalidates every rank above it.
 * Finiteness provenance now states the real threshold
   (`|b_ij| >= bound+1`), and refuses `bound < 2`.
-* Unchanged on purpose: seed enumeration (brute force) — replacing it is the
-  §1 decision.
+* Seed enumeration is orderly generation (`qmd/census.py`) or sampling; the
+  brute-force enumerator remains only as a test oracle.
 
 ## 4. API (`src/api/`)
 
