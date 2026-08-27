@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  math-pipeline:
+    name: Python pipeline (pytest + golden IDs)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: python -m pytest tests/ -q
+
+  worker:
+    name: Worker (typecheck + API smoke against local D1)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: npm ci
+      - run: npm run cf-typegen
+      - run: npm run typecheck
+
+      # Build the dataset the same way production is loaded, into a local D1.
+      - run: npm run db:migrate:local
+      - run: python scripts/populate.py --export-d1 dist/d1
+      - run: for f in dist/d1/qmd-n*.sql; do npx wrangler d1 execute qmd --local --file="$f"; done
+
+      - name: Start wrangler dev
+        run: |
+          npx wrangler dev --port 8787 > wrangler-dev.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -sf http://127.0.0.1:8787/api/health && break
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:8787/api/health
+      - run: npm run test:api
+      - name: Show wrangler log on failure
+        if: failure()
+        run: cat wrangler-dev.log

@@ -61,11 +61,21 @@ python scripts/populate.py --export-d1 dist/d1   # generate dataset
 for f in dist/d1/qmd-n*.sql; do npx wrangler d1 execute qmd --local --file=$f; done
 npm run dev                            # http://127.0.0.1:8787
 npm run typecheck
-npm run test:api                       # 40 API assertions against wrangler dev
-node scripts/browser-check.mjs         # Chromium end-to-end page checks
-python -m pytest tests/ -q; python tests/test_core.py   # math pipeline suite
+npm run test:api                       # ~50 API assertions against wrangler dev
+npx playwright install chromium        # once; then:
+npm run test:browser                   # Chromium end-to-end page checks
+python -m pytest tests/ -q             # math pipeline suite (incl. golden IDs)
 npm run deploy                         # production (needs CLOUDFLARE_API_TOKEN)
 ```
+
+CI (`.github/workflows/ci.yml`) runs pytest, typecheck, and the API smoke
+tests against a freshly generated local D1 on every push and PR.
+
+**IDs are frozen.** `tests/golden/ids-n4.json` pins every published
+`Q.*`/`MC.*` id (and class membership/sizes). A change that re-keys the
+database is a breaking change for citations; if it is ever intended, regenerate
+the golden file deliberately (`python tests/test_golden_ids.py --regenerate`)
+and ship an alias table for the old ids.
 
 Use a **scoped API token** (Workers + D1 edit on this account only); never a
 global key — this is a shared organizational Cloudflare account (ICARM).
