@@ -84,9 +84,9 @@ def _is_mutation_acyclic(q: Matrix, ctx: _Ctx) -> Optional[list[int]]:
 #
 # Banff and Louise use *covering pairs*: an arrow k -> j (or j -> k) through
 # which no directed cycle passes. Every arrow at a source or at a sink is a
-# covering pair, so both are tried; the search is symmetric under passing to
-# the opposite quiver (which swaps sources and sinks). P' is the
-# source-deletion condition as supplied (sources only).
+# covering pair, so both are tried, and P' likewise deletes a source or a
+# sink. All three searches are therefore symmetric under passing to the
+# opposite quiver (which swaps sources and sinks).
 
 def _sources(q: Matrix) -> list[int]:
     n = len(q)
@@ -107,13 +107,11 @@ def _extremal_vertices(q: Matrix) -> list[tuple[int, str]]:
 
 
 def _check_condition(q: Matrix, ctx: _Ctx, kind: str):
-    """Banff/Louise (source or sink) / P' (source) deletion condition on one quiver."""
+    """Banff / Louise / P' source-or-sink deletion condition on one quiver."""
     if is_acyclic(q):
         return (True, "acyclic")
     n = len(q)
-    candidates = ([(k, "source") for k in _sources(q)] if kind == "p_prime"
-                  else _extremal_vertices(q))
-    for k, role in candidates:
+    for k, role in _extremal_vertices(q):
         ok_k, w_k = _is_cond_class(_delete_vertex(q, k), ctx, kind)
         if not ok_k:
             continue

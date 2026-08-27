@@ -367,12 +367,12 @@ def has_known_non_ma_subquiver(members, known_false):
         <pre class="code-block"><code>def check_condition(q, kind):           # kind in {"banff", "louise", "p_prime"}
     if is_acyclic(q):
         return True                                 # base case
-    extremal = sources(q) if kind == "p_prime" else sources(q) + sinks(q)
-    for k in extremal:                              # a source (or, for Banff/Louise, a sink)
+    for k in sources(q) + sinks(q):                 # a source or a sink
+
         if not cond_class(delete_vertex(q, k), kind):
             continue
         if kind == "p_prime":
-            return True                             # P': one deletable source suffices
+            return True                             # P': one deletable source/sink suffices
         for j in neighbours(k, q):                  # Banff/Louise also need a neighbour j
             if not cond_class(delete_vertex(q, j), kind):
                 continue
@@ -394,9 +394,9 @@ def has_known_non_ma_subquiver(members, known_false):
       <section class="wiki-section" id="p-prime">
         <h2>P′</h2>
         <p>The <b>P′</b> condition is the weakest of the three deletion criteria: a quiver
-        passes if it is acyclic, or it has a <em>source</em> k whose deletion leaves a quiver still
-        satisfying P′ — no neighbour condition is required, and (unlike Banff/Louise) only
-        sources are used. (A distinct stronger property <b>P</b> is not yet tracked.)</p>
+        passes if it is acyclic, or it has a source or sink k whose deletion leaves a quiver still
+        satisfying P′ — no neighbour condition is required. (A distinct stronger property
+        <b>P</b> is not yet tracked.)</p>
       </section>
 
       <section class="wiki-section" id="three-state">

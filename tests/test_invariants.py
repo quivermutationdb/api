@@ -172,8 +172,8 @@ def _random_quivers(seed, count, ranks=(3, 4), weights=(0, 1, -1, 1, -1, 2, -2))
     return out
 
 
-@pytest.mark.parametrize("kind", ["banff", "louise"])
-def test_banff_louise_symmetric_under_opposite_quiver(kind):
+@pytest.mark.parametrize("kind", ["banff", "louise", "p_prime"])
+def test_deletion_conditions_symmetric_under_opposite_quiver(kind):
     """Sources and sinks swap under reversal, so the verdict must not change."""
     fn = getattr(la, f"{kind}_status")
     small = dict(max_depth=6, timeout=5, cap=4)
@@ -190,6 +190,8 @@ def test_banff_sink_witness_is_found():
     q = to_matrix([[0, 1, -1, 1], [-1, 0, 1, 1], [1, -1, 0, 1], [-1, -1, -1, 0]])
     assert la._sources(q) == [] and la._sinks(q) == [3]
     ok, witness = la._check_condition(q, la._Ctx(8, 5, 4), "banff")
+    assert ok and witness["role"] == "sink" and witness["vertex"] == 3
+    ok, witness = la._check_condition(q, la._Ctx(8, 5, 4), "p_prime")
     assert ok and witness["role"] == "sink" and witness["vertex"] == 3
 
 
