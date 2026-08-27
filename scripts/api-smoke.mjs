@@ -151,6 +151,43 @@ const json = async (path, s) => (await get(path, s)).json();
   check("random quiver resolves", detail.qmd_id === rq.qmd_id);
 }
 
+// ---- sorting ----------------------------------------------------------------
+{
+  const monotone = (xs, cmp) => xs.every((x, i) => i === 0 || cmp(xs[i - 1], x) <= 0);
+  const me = await json("/quivers?rank=4&sort=max_edge&dir=desc&limit=100");
+  check("sort max_edge desc is monotone",
+    monotone(me.items.map((i) => i.max_edge), (a, b) => b - a));
+  const dt = await json("/quivers?rank=3&sort=dynkin_type&dir=asc&is_open=false&limit=100");
+  const labels = dt.items.map((i) => i.dynkin_type ?? "");
+  check("sort dynkin_type asc is monotone", monotone(labels, (a, b) => a < b ? -1 : a > b ? 1 : 0),
+    labels.join(","));
+  const ct = await json("/quivers?rank=3&sort=class_type&dir=asc&limit=100");
+  check("sort class_type puts finite (is_open=false) first",
+    monotone(ct.items.map((i) => (i.is_open ? 1 : 0)), (a, b) => a - b));
+  const cs = await json("/quivers?rank=4&sort=class_size&dir=desc&is_open=false&limit=100");
+  check("sort class_size desc is monotone",
+    monotone(cs.items.map((i) => i.class_size), (a, b) => b - a));
+  check("unknown sort -> 400", "detail" in await json("/quivers?sort=bogus", 400));
+  check("bad dir -> 400", "detail" in await json("/quivers?dir=sideways", 400));
+  check("/classes unknown sort -> 400", "detail" in await json("/classes?sort=bogus", 400));
+  const cd = await json("/classes?rank=4&sort=dynkin_type&dir=desc&is_open=false&limit=100");
+  check("/classes sort dynkin_type desc is monotone",
+    monotone(cd.items.map((i) => i.dynkin_type ?? ""), (a, b) => a < b ? 1 : a > b ? -1 : 0));
+}
+
+// ---- mutation-finiteness filters use the *proved* columns -----------------
+{
+  const fin = await json("/classes?is_mutation_finite=true&limit=1000");
+  check("is_mutation_finite=true -> all is_finite_confirmed",
+    fin.items.length > 0 && fin.items.every((c) => c.is_finite_confirmed === true));
+  const inf = await json("/classes?is_mutation_finite=false&limit=1000");
+  check("is_mutation_finite=false -> all is_infinite_confirmed",
+    inf.items.length > 0 && inf.items.every((c) => c.is_infinite_confirmed === true));
+  const all = await json("/classes?limit=1");
+  check("finite + infinite(confirmed) partition the classes (no 'expected' rows today)",
+    fin.total + inf.total === all.total, `${fin.total}+${inf.total} vs ${all.total}`);
+}
+
 // ---- /export ---------------------------------------------------------------
 {
   const res = await get("/export?rank=2");

@@ -182,6 +182,7 @@ function renderActivePills(filters) {
 }
 
 let _lastFilters = {};
+let searchSeq = 0;      // monotone request counter; stale responses are dropped
 let _lastTotal = null;
 let _lastLabeledTotal = null;
 
@@ -227,43 +228,27 @@ async function runSearch() {
 
   area.innerHTML = '<div class="state-msg"><div class="spinner"></div>Searching…</div>';
 
+  // Keep the URL in sync so a search is shareable / survives reload.
+  history.replaceState(null, '', `?${new URLSearchParams(filters)}`);
+
   const params = new URLSearchParams({ limit: 100, ...filters });
+  const seq = ++searchSeq;
   let data;
   try {
     const res = await fetch(`${API}/search?${params}`);
-    if (!res.ok) throw new Error();
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     document.getElementById('api-status').textContent = 'connected';
     data = await res.json();
-  } catch {
-    document.getElementById('api-status').textContent = 'demo mode';
-    // Demo results
-    data = demoSearch(filters);
+  } catch (e) {
+    console.error(e);
+    if (seq !== searchSeq) return;
+    document.getElementById('api-status').textContent = 'unavailable';
+    area.innerHTML = '<div class="state-msg">The database is temporarily unavailable. Please try again shortly.</div>';
+    return;
   }
+  if (seq !== searchSeq) return;   // superseded by a newer search
 
   renderResults(data, filters);
-}
-
-function demoSearch(filters) {
-  const rank = filters.rank ? parseInt(filters.rank) : null;
-  const items = [];
-  for (let i = 0; i < 12; i++) {
-    const n = rank ?? ((i % 4) + 1);
-    const isOpen = i % 4 === 0;
-    items.push({
-      qmd_id: `Q.n${n}.${(0xbeef00 + i * 0x3f1).toString(16).padEnd(16,'0')}`,
-      num_vertices: n,
-      dynkin_type: filters.dynkin_type || ['A3','D4','E6','—'][i % 4],
-      representation_type: filters.representation_type || ['finite','wild','tame','wild'][i % 4],
-      max_edge: (i % 2) + 1,
-      is_acyclic: !isOpen,
-      is_connected: true,
-      is_bipartite: i % 2 === 0,
-      is_open: isOpen,
-      class_size: isOpen ? null : [2,14,50,132][n-1],
-      mc_id: `MC.n${n}.${(0xdead00 + i * 0x1c7).toString(16).padEnd(16,'0')}`,
-    });
-  }
-  return { items, total: items.length };
 }
 
 function renderResults(data, filters) {
@@ -338,12 +323,28 @@ function resetSearch() {
   document.getElementById('results-area').innerHTML = '';
 }
 
-// Auto-run from URL params if present
-const urlParams = new URLSearchParams(location.search);
-if ([...urlParams.keys()].some(k => k !== 'id')) {
-  // pre-populate form from URL and run
-  runSearch();
-}
+// Deep links: pre-populate the form from URL params (the same keys the API
+// takes) and run. Selects ignore values that aren't one of their options.
+const URL_FIELDS = {
+  rank: 'f-rank', dynkin_type: 'f-dynkin', representation_type: 'f-reptype',
+  max_edge: 'f-maxedge', is_open: 'f-open', orbit_min: 'f-orbit-min', orbit_max: 'f-orbit-max',
+};
+const URL_CHECKS = {
+  is_acyclic: 'f-acyclic', is_connected: 'f-connected',
+  is_simply_laced: 'f-simply-laced', is_mutation_finite: 'f-mutation-finite',
+};
+(function initFromUrl() {
+  const urlParams = new URLSearchParams(location.search);
+  let any = false;
+  for (const [key, id] of Object.entries(URL_FIELDS)) {
+    const v = urlParams.get(key);
+    if (v) { document.getElementById(id).value = v; any = true; }
+  }
+  for (const [key, id] of Object.entries(URL_CHECKS)) {
+    if (urlParams.get(key) === 'true') { document.getElementById(id).checked = true; any = true; }
+  }
+  if (any) runSearch();
+})();
 </script>
 <footer>
   <span>Quiver Mutation Database (QMD)</span>

@@ -147,44 +147,18 @@ async function fetchQuivers(page = 1) {
     if (!v) params.delete(k);
   }
 
-  try {
-    const res = await fetch(`${API}/quivers?${params}`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    document.getElementById('api-status').textContent = 'connected';
-    return await res.json();
-  } catch (e) {
-    // Demo mode: generate synthetic data when API isn't live yet
-    return demoData(offset);
-  }
+  const res = await fetch(`${API}/quivers?${params}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  document.getElementById('api-status').textContent = 'connected';
+  return await res.json();
 }
 
-function demoData(offset) {
-  // Synthetic rows so the page is useful before the API is live
-  const types = ['A','D','E','—'];
-  const dynkin = ['A1','A2','A3','A4','D4','D5','E6','E7','E8','—','—','—'];
-  const rows = [];
-  for (let i = 0; i < PAGE_SIZE; i++) {
-    const idx = offset + i;
-    const n = (idx % 4) + 1;
-    const isOpen = idx % 3 === 0;
-    const dyn = dynkin[idx % dynkin.length];
-    rows.push({
-      qmd_id: `Q.n${n}.${(0xdeadbeef + idx * 0x9e3779b9).toString(16).slice(0,16).padEnd(16,'0')}`,
-      num_vertices: n,
-      dynkin_type: isOpen ? null : dyn,
-      representation_type: isOpen ? 'wild' : ['finite','tame','wild'][idx % 3],
-      max_edge: (idx % 2) + 1,
-      is_acyclic: !isOpen,
-      is_connected: true,
-      is_bipartite: idx % 2 === 0,
-      is_open: isOpen,
-      class_size: isOpen ? null : [2,14,50,132][n-1],
-      exchange_matrix: [[0, 1], [-1, 0]],
-      mc_id: `MC.n${n}.${(0xcafebabe + idx * 0x6c62272e).toString(16).slice(0,16).padEnd(16,'0')}`,
-    });
-  }
-  document.getElementById('api-status').textContent = 'demo mode';
-  return { items: rows, total: 724, distinct_total: 724, labeled_total: 4326 };
+function renderError() {
+  document.getElementById('api-status').textContent = 'unavailable';
+  document.getElementById('table-body').innerHTML = `<tr><td colspan="12">
+    <div class="state-msg">The database is temporarily unavailable. Please try again shortly.</div>
+  </td></tr>`;
+  document.getElementById('pagination').innerHTML = '';
 }
 
 function renderTable(data) {
@@ -257,11 +231,26 @@ function renderPagination(totalPages) {
   el.innerHTML = pages.join('');
 }
 
+// Monotone request counter: a slow earlier response must never overwrite a
+// newer one (rapid page/sort/filter clicks).
+let requestSeq = 0;
+
 async function goPage(p) {
   const totalPages = Math.ceil(totalCount / PAGE_SIZE);
-  if (p < 1 || p > totalPages) return;
+  // Only bound-check against a known page count; after an empty result
+  // (totalCount 0) page 1 must still be reachable so filters can be changed.
+  if (p < 1 || (totalPages > 0 && p > totalPages)) return;
   currentPage = p;
-  const data = await fetchQuivers(currentPage);
+  const seq = ++requestSeq;
+  let data;
+  try {
+    data = await fetchQuivers(currentPage);
+  } catch (e) {
+    console.error(e);
+    if (seq === requestSeq) renderError();
+    return;
+  }
+  if (seq !== requestSeq) return;   // superseded
   renderTable(data);
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
@@ -319,10 +308,7 @@ document.querySelectorAll('th[data-col]').forEach(th => {
 });
 
 // Initial load
-(async () => {
-  const data = await fetchQuivers(1);
-  renderTable(data);
-})();
+goPage(1);
 </script>
 <footer>
   <span>Quiver Mutation Database (QMD)</span>

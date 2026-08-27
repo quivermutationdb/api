@@ -78,7 +78,7 @@ function renderMatrix(matrix) {
 }
 
 // Collapse the labeled orbit into one entry per distinct unlabeled quiver.
-// Used as a fallback when the API doesn't supply distinct_quivers (e.g. demo).
+// Fallback if the API ever omits distinct_quivers.
 function deriveDistinct(labeled, canonId) {
   const map = new Map();
   labeled.forEach(m => {
@@ -298,68 +298,38 @@ function renderPage(mc) {
 }
 
 async function fetchClass(id) {
-  try {
-    const res = await fetch(`${API}/classes/${encodeURIComponent(id)}`);
-    if (!res.ok) throw new Error();
-    document.getElementById('api-status').textContent = 'connected';
-    return await res.json();
-  } catch {
-    document.getElementById('api-status').textContent = 'demo mode';
-    // Demo A3 mutation class
-    const members = [
-      [[0,1,0],[-1,0,1],[0,-1,0]],
-      [[0,-1,0],[1,0,-1],[0,1,0]],
-      [[0,1,-1],[-1,0,0],[1,0,0]],
-      [[0,-1,1],[1,0,0],[-1,0,0]],
-      [[0,0,1],[0,0,1],[-1,-1,0]],
-      [[0,0,-1],[0,0,-1],[1,1,0]],
-      [[0,1,0],[-1,0,-1],[0,1,0]],
-      [[0,-1,0],[1,0,1],[0,-1,0]],
-      [[0,0,1],[0,0,-1],[-1,1,0]],
-      [[0,0,-1],[0,0,1],[1,-1,0]],
-      [[0,1,1],[-1,0,0],[-1,0,0]],
-      [[0,-1,-1],[1,0,0],[1,0,0]],
-      [[0,1,-1],[-1,0,1],[1,-1,0]],
-      [[0,-1,1],[1,0,-1],[-1,1,0]],
-    ].map((matrix, i) => ({
-      qmd_id: `Q.n3.${(0x8b4942 + i * 0x1f9a).toString(16).padEnd(16,'0')}`,
-      matrix,
-    }));
-    return {
-      mc_id: id,
-      label: 'A3',
-      num_vertices: 3,
-      dynkin_type: 'A3',
-      is_open: false,
-      labeled_size: 14,
-      distinct_quiver_count: 4,
-      merged_orbit_count: 1,
-      is_finite_confirmed: true,
-      is_infinite_confirmed: false,
-      is_infinite_expected: false,
-      size_of_explored_mutation_class: 14,
-      size_of_explored_frontier: 0,
-      is_mutation_acyclic: true,
-      is_banff: true,
-      is_louise: true,
-      is_p_prime: true,
-      provenance: {
-        is_banff: { state: 'true', witness: { condition: 'acyclic', mutations: [] } },
-        is_louise: { state: 'true', witness: { condition: 'acyclic', mutations: [] } },
-        is_p_prime: { state: 'true', witness: { condition: 'acyclic', mutations: [] } },
-      },
-      canonical_matrix: [[0,-1,-1],[1,0,0],[1,0,0]],
-      canonical_qid: members[11].qmd_id,
-      labeled_quivers: members,
-    };
+  const res = await fetch(`${API}/classes/${encodeURIComponent(id)}`);
+  if (!res.ok) {
+    const err = new Error(`HTTP ${res.status}`);
+    err.status = res.status;
+    throw err;
   }
+  document.getElementById('api-status').textContent = 'connected';
+  return res.json();
 }
 
+const MCID_RE = /^MC\.n\d+\.[0-9a-f]{16}$/;
+const esc = s => String(s).replace(/[&<>"']/g,
+  ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
+function showMessage(html) {
+  document.getElementById('page-content').innerHTML = `<div class="state-msg">${html}</div>`;
+}
+const BROWSE_LINK = '<a href="/browse.html" style="color:var(--accent)">Browse all quivers →</a>';
+
 if (!mcId) {
-  document.getElementById('page-content').innerHTML =
-    '<div class="state-msg">No class ID specified. <a href="/browse.html" style="color:var(--accent)">Browse all quivers →</a></div>';
+  showMessage(`No class ID specified. ${BROWSE_LINK}`);
+} else if (!MCID_RE.test(mcId)) {
+  showMessage(`<code>${esc(mcId)}</code> is not a mutation class ID (expected <code>MC.n&lt;rank&gt;.&lt;16 hex digits&gt;</code>). ${BROWSE_LINK}`);
 } else {
-  fetchClass(mcId).then(renderPage);
+  fetchClass(mcId).then(renderPage).catch(err => {
+    console.error(err);
+    if (err.status === 404) {
+      showMessage(`No mutation class with ID <code>${esc(mcId)}</code> in the database. ${BROWSE_LINK}`);
+    } else {
+      document.getElementById('api-status').textContent = 'unavailable';
+      showMessage('The database is temporarily unavailable. Please try again shortly.');
+    }
+  });
 }
 </script>
 <footer>

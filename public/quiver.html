@@ -38,6 +38,14 @@
 <script>
 const API = '/api';
 const qid = new URLSearchParams(location.search).get('id');
+const QID_RE = /^Q\.n\d+\.[0-9a-f]{16}$/;
+
+const esc = s => String(s).replace(/[&<>"']/g,
+  ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
+function showMessage(html) {
+  document.getElementById('page-content').innerHTML = `<div class="state-msg">${html}</div>`;
+}
+const BROWSE_LINK = '<a href="/browse.html" style="color:var(--accent)">Browse all quivers →</a>';
 
 function renderMatrix(matrix) {
   const n = matrix.length;
@@ -200,42 +208,30 @@ function renderClassMembers(members, currentQid, canonicalQid) {
 }
 
 async function fetchQuiver(id) {
-  try {
-    const res = await fetch(`${API}/quivers/${encodeURIComponent(id)}`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    document.getElementById('api-status').textContent = 'connected';
-    return await res.json();
-  } catch {
-    document.getElementById('api-status').textContent = 'demo mode';
-    // Demo quiver
-    return {
-      qmd_id: id,
-      label: 'A3',
-      num_vertices: 3,
-      exchange_matrix: [[0,1,0],[-1,0,1],[0,-1,0]],
-      dynkin_type: 'A3',
-      is_finite_type: true,
-      is_open: false,
-      is_acyclic: true,
-      is_connected: true,
-      is_bipartite: true,
-      is_abundant: false,
-      is_planar: true,
-      representation_type: 'finite',
-      symmetry_group: { order: 2, name: 'Z/2', generators: [[2,1,0]] },
-      max_edge: 1,
-      class_size: 14,
-      mc_id: 'MC.n3.8b4942ccbfd5b5aa',
-      tags: ['acyclic', 'simply-laced', 'cluster-finite'],
-    };
+  const res = await fetch(`${API}/quivers/${encodeURIComponent(id)}`);
+  if (!res.ok) {
+    const err = new Error(`HTTP ${res.status}`);
+    err.status = res.status;
+    throw err;
   }
+  document.getElementById('api-status').textContent = 'connected';
+  return res.json();
 }
 
 if (!qid) {
-  document.getElementById('page-content').innerHTML =
-    '<div class="state-msg">No quiver ID specified. <a href="/browse.html" style="color:var(--accent)">Browse all quivers →</a></div>';
+  showMessage(`No quiver ID specified. ${BROWSE_LINK}`);
+} else if (!QID_RE.test(qid)) {
+  showMessage(`<code>${esc(qid)}</code> is not a quiver ID (expected <code>Q.n&lt;rank&gt;.&lt;16 hex digits&gt;</code>). ${BROWSE_LINK}`);
 } else {
-  fetchQuiver(qid).then(renderPage);
+  fetchQuiver(qid).then(renderPage).catch(err => {
+    console.error(err);
+    if (err.status === 404) {
+      showMessage(`No quiver with ID <code>${esc(qid)}</code> in the database. ${BROWSE_LINK}`);
+    } else {
+      document.getElementById('api-status').textContent = 'unavailable';
+      showMessage('The database is temporarily unavailable. Please try again shortly.');
+    }
+  });
 }
 </script>
 <footer>

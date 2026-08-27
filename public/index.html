@@ -64,7 +64,7 @@
       <div class="lbl">Labeled quivers</div>
     </div>
     <div class="stat-card">
-      <div class="num">1&ndash;4</div>
+      <div class="num" id="stat-ranks">—</div>
       <div class="lbl">Ranks covered</div>
     </div>
   </div>
@@ -189,13 +189,13 @@ const API = '/api';
 // ----- "Did you know" facts (rotated) ----------------------------------
 const FACTS = [
   "Quiver mutation is an involution: mutating at the same vertex twice returns the original quiver.",
-  "Quivers of finite mutation type are classified — they're either rank 2, of Dynkin or affine type, or one of a handful of exceptional families.",
+  "Mutation-finite quivers are classified (Felikson–Shapiro–Tumarkin, 2012): every one has rank 2, comes from a triangulated surface, or lies in one of eleven exceptional mutation classes.",
   "Fomin and Zelevinsky introduced quiver (matrix) mutation in 2002 as the engine behind cluster algebras.",
   "Two quivers are mutation-equivalent if one can be reached from the other by a finite sequence of mutations.",
-  "An acyclic quiver of Dynkin type A, D, or E generates a cluster algebra of finite type — only finitely many seeds.",
-  "Markov quivers (three vertices, all edges doubled) are the smallest connected quivers of infinite mutation type.",
-  "A quiver's exchange matrix is skew-symmetric, so its mutation class is determined entirely by the upper triangle.",
-  "Mutation classes can be astronomically large: even modest rank-4 quivers can have hundreds of distinct members.",
+  "A cluster algebra has finitely many cluster variables exactly when its quiver is mutation-equivalent to an orientation of a Dynkin diagram of type A, D, or E.",
+  "The Markov quiver (three vertices, each pair joined by a double arrow) is sent to an isomorphic copy of itself by every mutation, so its mutation class is a single quiver — yet it is not mutation-acyclic.",
+  "An exchange matrix is skew-symmetric, so the entries above the diagonal determine it completely: the sign of b_ij records the direction of the arrows between i and j, and |b_ij| their number.",
+  "If any quiver in a mutation class of rank at least 3 has an entry with |b_ij| ≥ 3, the class is mutation-infinite — that is how QMD proves an open class infinite.",
 ];
 
 function showFact(i) {
@@ -225,42 +225,30 @@ document.getElementById('fact-next').addEventListener('click', () => showFact(++
 
 // ----- Live data: stats, featured quiver, random navigation ------------
 const status = document.getElementById('api-status');
-let total = 0;                       // distinct-quiver count, for random offsets
+const setStatus = ok => { status.textContent = ok ? 'connected' : 'unavailable'; };
 
-const DEMO_MATRIX = [[0, 1, -1], [-1, 0, 1], [1, -1, 0]];
-function demoItem() {
-  return {
-    qmd_id: 'Q.n3.demodemodemodemo',
-    mc_id: 'MC.n3.demodemodemodemo',
-    exchange_matrix: DEMO_MATRIX,
-    num_vertices: 3,
-  };
+async function fetchJson(path) {
+  const res = await fetch(`${API}${path}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
 }
 
-// Fetch one quiver at a (random) offset. Falls back to synthetic demo data.
-async function fetchQuiverAt(offset) {
+// Stat cards come from the ingest-time aggregates (/stats), never a scan.
+async function loadStats() {
   try {
-    const res = await fetch(`${API}/quivers?limit=1&offset=${offset}`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json();
-    if (total === 0 && data.total) total = data.total;
-    status.textContent = 'connected';
-    if (data.distinct_total != null) {
-      document.getElementById('stat-distinct').textContent = data.distinct_total.toLocaleString();
+    const s = await fetchJson('/stats');
+    setStatus(true);
+    document.getElementById('stat-distinct').textContent = s.distinct_quivers.toLocaleString();
+    document.getElementById('stat-labeled').textContent = s.labeled_quivers.toLocaleString();
+    const ranks = (s.by_rank || []).map(r => r.n);
+    if (ranks.length) {
+      const lo = Math.min(...ranks), hi = Math.max(...ranks);
+      document.getElementById('stat-ranks').textContent = lo === hi ? String(lo) : `${lo}–${hi}`;
     }
-    if (data.labeled_total != null) {
-      document.getElementById('stat-labeled').textContent = data.labeled_total.toLocaleString();
-    }
-    return (data.items && data.items[0]) || demoItem();
-  } catch (e) {
-    status.textContent = 'demo mode';
-    document.getElementById('stat-distinct').textContent = '724';
-    document.getElementById('stat-labeled').textContent = '3,754';
-    return demoItem();
+  } catch {
+    setStatus(false);
   }
 }
-
-const randOffset = () => (total > 0 ? Math.floor(Math.random() * total) : 0);
 
 function drawFeatured(item) {
   const fig = document.getElementById('featured-figure');
@@ -275,31 +263,44 @@ function drawFeatured(item) {
     `/quiver.html?id=${encodeURIComponent(item.qmd_id)}`;
 }
 
+// A uniformly random quiver via /random/quiver (rank_stats-weighted), then
+// its detail for the matrix.
 async function loadFeatured() {
   const fig = document.getElementById('featured-figure');
   fig.innerHTML = '<div class="state-msg" style="padding:2rem"><div class="spinner"></div></div>';
-  drawFeatured(await fetchQuiverAt(randOffset()));
+  try {
+    const pick = await fetchJson('/random/quiver');
+    const item = await fetchJson(`/quivers/${encodeURIComponent(pick.qmd_id)}`);
+    setStatus(true);
+    drawFeatured(item);
+  } catch {
+    setStatus(false);
+    fig.innerHTML = '<div class="state-msg">The database is temporarily unavailable.</div>';
+    document.getElementById('featured-id').textContent = '';
+  }
 }
 
 document.getElementById('featured-shuffle').addEventListener('click', loadFeatured);
 
-// Random-navigation buttons: fetch a fresh random quiver, then go to its page.
-async function goRandom(key, page) {
-  const btn = key === 'qmd_id' ? document.getElementById('random-quiver')
-                               : document.getElementById('random-class');
-  btn.style.opacity = '0.6';
-  const item = await fetchQuiverAt(randOffset());
-  location.href = `/${page}?id=${encodeURIComponent(item[key])}`;
+// Random-navigation buttons: /random/{quiver,class} are unbiased (a random
+// *class*, not the class of a random quiver).
+async function goRandom(kind) {
+  const btn = document.getElementById(kind === 'quiver' ? 'random-quiver' : 'random-class');
+  btn.disabled = true;
+  try {
+    const pick = await fetchJson(`/random/${kind}`);
+    const id = kind === 'quiver' ? pick.qmd_id : pick.mc_id;
+    location.href = `/${kind}.html?id=${encodeURIComponent(id)}`;
+  } catch {
+    setStatus(false);
+    btn.disabled = false;
+  }
 }
-document.getElementById('random-quiver').addEventListener('click', () => goRandom('qmd_id', 'quiver.html'));
-document.getElementById('random-class').addEventListener('click', () => goRandom('mc_id', 'class.html'));
+document.getElementById('random-quiver').addEventListener('click', () => goRandom('quiver'));
+document.getElementById('random-class').addEventListener('click', () => goRandom('class'));
 
-// Initial load: one request to seed `total` + stats, then draw a random
-// featured quiver (so it isn't always the trivial offset-0 quiver).
-(async () => {
-  await fetchQuiverAt(0);   // learns total + populates the stat cards
-  await loadFeatured();     // now `total` is known, so this is genuinely random
-})();
+loadStats();
+loadFeatured();
 </script>
 
 </body>

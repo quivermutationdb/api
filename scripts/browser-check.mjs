@@ -13,7 +13,10 @@ const a3 = await (await fetch(`${BASE}/api/search?dynkin_type=A3&limit=1`)).json
 const qid = a3.items[0].qmd_id;
 const mcId = a3.items[0].mc_id;
 
-const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
+// PW_CHROMIUM overrides the browser binary (CI sandboxes); default is the
+// Playwright-managed Chromium (`npx playwright install chromium`).
+const browser = await chromium.launch(
+  process.env.PW_CHROMIUM ? { executablePath: process.env.PW_CHROMIUM } : {});
 const page = await browser.newPage();
 const errors = [];
 page.on("pageerror", (e) => errors.push(String(e)));
@@ -49,7 +52,7 @@ check("browse: api connected",
   await page.locator("#api-status").textContent() === "connected");
 // Rank filter
 await page.selectOption("#filter-rank", "3");
-await page.click("#apply-filters").catch(() => page.evaluate(() => applyFilters()));
+await page.evaluate(() => applyFilters());
 await page.waitForFunction(() =>
   document.querySelectorAll("#table-body tr").length === 25, null, { timeout: 15000 });
 check("browse: rank-3 filter shows 25 rows", true);
@@ -99,6 +102,43 @@ const hasModal = await page.evaluate(() => !!window.QMDDownload && !!window.QMDX
 check("download modal + xlsx lib present", hasModal);
 
 check("no page errors", errors.length === 0, errors.slice(0, 3).join(" | "));
+
+// ---- Error states: no fabricated data, no reflected markup ----
+const payload = "<img src=x onerror=window.__pwned=1>";
+await page.goto(`${BASE}/quiver.html?id=${encodeURIComponent(payload)}`, { waitUntil: "networkidle" });
+check("quiver: malformed id renders a message, not a quiver",
+  (await page.locator("#page-content .state-msg").count()) === 1
+  && (await page.locator("#page-content .qid").count()) === 0);
+check("quiver: malformed id is escaped (no script execution)",
+  await page.evaluate(() => window.__pwned === undefined)
+  && (await page.locator("#page-content img").count()) === 0);
+await page.goto(`${BASE}/quiver.html?id=Q.n3.0000000000000000`, { waitUntil: "networkidle" });
+check("quiver: unknown id -> 'No quiver with ID'",
+  (await page.locator("#page-content .state-msg").textContent() ?? "").includes("No quiver with ID"));
+await page.goto(`${BASE}/class.html?id=MC.n3.0000000000000000`, { waitUntil: "networkidle" });
+check("class: unknown id -> 'No mutation class with ID'",
+  (await page.locator("#page-content .state-msg").textContent() ?? "").includes("No mutation class with ID"));
+
+// ---- Browse recovers from an empty result ----
+await page.goto(`${BASE}/browse.html`, { waitUntil: "networkidle" });
+await page.waitForFunction(() => document.querySelectorAll("#table-body tr").length === 50, null, { timeout: 15000 });
+await page.fill("#filter-dynkin", "Z9");
+await page.evaluate(() => applyFilters());
+await page.waitForFunction(() => document.querySelectorAll("#table-body tr").length === 1, null, { timeout: 15000 });
+await page.evaluate(() => resetFilters());
+await page.waitForFunction(() => document.querySelectorAll("#table-body tr").length === 50, null, { timeout: 15000 });
+check("browse: reset after an empty result reloads the table", true);
+
+// ---- Search deep link populates the form and runs ----
+await page.goto(`${BASE}/search.html?rank=3&is_acyclic=true`, { waitUntil: "networkidle" });
+await page.waitForFunction(() => document.querySelectorAll("#results-area tbody tr").length > 0, null, { timeout: 15000 });
+check("search: deep link fills the form",
+  await page.inputValue("#f-rank") === "3" && await page.isChecked("#f-acyclic"));
+
+// ---- Home uses /stats and /random ----
+await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
+check("home: ranks covered derived from /stats",
+  await page.locator("#stat-ranks").textContent() === "1–4");
 
 await browser.close();
 console.log(failures === 0 ? "\nBROWSER CHECKS PASS" : `\n${failures} FAILURE(S)`);

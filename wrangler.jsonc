@@ -16,8 +16,7 @@
     { "pattern": "www.quivermutationdb.org", "custom_domain": true }
   ],
 
-  // Static frontend (folded in from the `website` repo in migration step 5;
-  // until then `public/` holds a placeholder page).
+  // Static frontend (the site's HTML/CSS/JS, served as Workers Static Assets).
   "assets": {
     "directory": "./public",
     "binding": "ASSETS",

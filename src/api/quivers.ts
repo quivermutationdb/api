@@ -84,7 +84,13 @@ export function filterConditions(f: ListFilters): SQL[] {
   // Class-side filters exclude quivers without a class, as in Postgres
   // (an inner comparison against a NULL outer-join row never matches).
   if (f.isOpen !== undefined) conds.push(eq(mc.isOpen, f.isOpen));
-  if (f.isMutationFinite !== undefined) conds.push(eq(mc.isOpen, !f.isMutationFinite));
+  // Mutation-finiteness filters on the *proved* columns, never on is_open:
+  // a class that is only is_infinite_expected matches neither value.
+  if (f.isMutationFinite !== undefined) {
+    conds.push(f.isMutationFinite
+      ? eq(mc.isFiniteConfirmed, true)
+      : eq(mc.isInfiniteConfirmed, true));
+  }
   if (f.dynkinType !== undefined) conds.push(eq(mc.dynkinType, f.dynkinType));
   if (f.representationType !== undefined) {
     conds.push(eq(q.representationType, f.representationType));
@@ -100,11 +106,20 @@ const SORT_COLUMNS = {
   num_vertices: q.n,
   class_size: mc.classSize,
   max_edge: q.maxEdge,
+  dynkin_type: mc.dynkinType,
+  class_type: mc.isOpen,      // browse.html "Class" column (finite/open)
 } as const;
 
+/** Whitelisted sort column + direction; unknown values are a 400, not a silent fallback. */
 export function sortOrder(sort: string | undefined, dir: string | undefined) {
-  const col = SORT_COLUMNS[(sort ?? "num_vertices") as keyof typeof SORT_COLUMNS]
-    ?? q.n;
+  const key = sort ?? "num_vertices";
+  if (!Object.hasOwn(SORT_COLUMNS, key)) {
+    throw new BadRequest(`sort must be one of ${Object.keys(SORT_COLUMNS).join(", ")}`);
+  }
+  if (dir !== undefined && dir !== "asc" && dir !== "desc") {
+    throw new BadRequest("dir must be 'asc' or 'desc'");
+  }
+  const col = SORT_COLUMNS[key as keyof typeof SORT_COLUMNS];
   return [dir === "desc" ? desc(col) : asc(col), asc(q.id)];
 }
 

@@ -31,6 +31,8 @@ const CLASS_SORT = {
   num_vertices: mc.n,
   class_size: mc.classSize,
   distinct_quiver_count: mc.distinctQuiverCount,
+  dynkin_type: mc.dynkinType,
+  class_type: mc.isOpen,
 } as const;
 
 classesRoutes.get("/", async (c) => {
@@ -58,7 +60,9 @@ classesRoutes.get("/", async (c) => {
   const isOpen = bool("is_open");
   if (isOpen !== undefined) conds.push(eq(mc.isOpen, isOpen));
   const mutFinite = bool("is_mutation_finite");
-  if (mutFinite !== undefined) conds.push(eq(mc.isOpen, !mutFinite));
+  if (mutFinite !== undefined) {
+    conds.push(mutFinite ? eq(mc.isFiniteConfirmed, true) : eq(mc.isInfiniteConfirmed, true));
+  }
   const mutAcyclic = bool("is_mutation_acyclic");
   if (mutAcyclic !== undefined) conds.push(eq(mc.isMutationAcyclic, mutAcyclic));
   const sizeMin = int("orbit_min");
@@ -67,8 +71,16 @@ classesRoutes.get("/", async (c) => {
   if (sizeMax !== undefined) conds.push(sql`${mc.classSize} <= ${sizeMax}`);
   const where = conds.length ? and(...conds) : undefined;
 
-  const col = CLASS_SORT[(get("sort") ?? "num_vertices") as keyof typeof CLASS_SORT] ?? mc.n;
-  const order = [get("dir") === "desc" ? desc(col) : asc(col), asc(mc.id)];
+  const sortKey = get("sort") ?? "num_vertices";
+  if (!Object.hasOwn(CLASS_SORT, sortKey)) {
+    throw new BadRequest(`sort must be one of ${Object.keys(CLASS_SORT).join(", ")}`);
+  }
+  const dir = get("dir");
+  if (dir !== undefined && dir !== "asc" && dir !== "desc") {
+    throw new BadRequest("dir must be 'asc' or 'desc'");
+  }
+  const col = CLASS_SORT[sortKey as keyof typeof CLASS_SORT];
+  const order = [dir === "desc" ? desc(col) : asc(col), asc(mc.id)];
   const offset = Math.max(int("offset") ?? 0, 0);
   const limit = Math.min(Math.max(int("limit") ?? 50, 1), 1000);
 
@@ -90,6 +102,9 @@ classesRoutes.get("/", async (c) => {
       distinct_quiver_count: r.distinctQuiverCount,
       merged_orbit_count: r.mergedOrbitCount,
       canonical_qid: r.canonicalQuiverId,
+      is_finite_confirmed: r.isFiniteConfirmed,
+      is_infinite_confirmed: r.isInfiniteConfirmed,
+      is_infinite_expected: r.isInfiniteExpected,
       is_mutation_acyclic: r.isMutationAcyclic,
       is_banff: r.isBanff,
       is_louise: r.isLouise,

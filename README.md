@@ -93,17 +93,17 @@ r = run_generation(max_vertices=4, bound=2)
 print(f'{len(r.quivers)} quivers in {len(r.classes)} mutation classes')
 "
 
-# Run tests
-python -m pytest tests/ -v
+# Run tests (the golden-ID test guards every published Q.*/MC.* id)
+python -m pytest tests/ -q
 ```
 
 ## Known Results (sanity checks)
 
-| Quiver type | Mutation class size |
-|---|---|
-| A2          | 2                   |
-| A3          | 14                  |
-| D4          | 132 (finite type)   |
+| Quiver type | Labeled exchange matrices in the class | Distinct quivers |
+|---|---|---|
+| A2          | 2   | 1 |
+| A3          | 14  | 4 |
+| D4          | 50  | 6 |
 
 ## Contact
 
