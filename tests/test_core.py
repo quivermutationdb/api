@@ -258,8 +258,11 @@ def test_bfs_known_sizes():
 
 def test_bfs_data_model_consistency():
     r = explore_mutation_class(A3)
-    assert len(r.quiver_ids) == len(r.labeled_quivers)
-    assert all(quiver_id(m) == qid for m, qid in zip(r.labeled_quivers, r.quiver_ids))
+    assert len(r.quiver_ids) == len(r.members) and len(r.labeled_ids) == len(r.labeled_quivers)
+    assert all(quiver_id(m) == qid for m, qid in zip(r.members, r.quiver_ids))
+    assert all(canonical_form(m) == m for m in r.members)
+    assert all(quiver_id(m) == qid for m, qid in zip(r.labeled_quivers, r.labeled_ids))
+    assert set(r.labeled_ids) == set(r.quiver_ids)          # every member has labelings
     assert is_skew_symmetric(r.canonical_rep) and is_bounded(r.canonical_rep)
     assert all(is_bounded(m, 2) for m in r.labeled_quivers)
     assert all(is_bounded(m, 2) for m in explore_mutation_class(D4).labeled_quivers)
@@ -278,21 +281,22 @@ def test_closed_class_is_mutation_closed(m):
 
 def test_node_cap_semantics():
     """cap without a crossing -> truncated; cap after a crossing -> still bound."""
-    r = explore_mutation_class(D4, node_cap=10)
-    assert r.exploration == "truncated" and r.is_open and r.labeled_size == 10
+    r = explore_mutation_class(D4, node_cap=3)          # D4 has 6 distinct quivers
+    assert r.exploration == "truncated" and r.is_open
+    assert r.distinct_quiver_count == 3 and r.labeled_size is None
     # A class that crosses |b_ij| <= 2 quickly: Kronecker-ish rank-3 seed.
     m = to_matrix([[0, 2, -1], [-2, 0, 2], [1, -2, 0]])
     full = explore_mutation_class(m)
     assert full.exploration == "bound"
-    capped = explore_mutation_class(m, node_cap=3)
+    capped = explore_mutation_class(m, node_cap=2)
     assert capped.exploration == "bound", "a crossing proves infinitude; the cap must not hide it"
-    assert capped.labeled_size <= 3 + 1
+    assert capped.distinct_quiver_count <= 2 and capped.labeled_size is None
 
 
 def test_open_class_has_boundary():
     res = explore_mutation_class(to_matrix([[0, 1, 1], [-1, 0, 1], [-1, -1, 0]]), bound=2)
     if res.is_open:
-        assert len(res.boundary_quivers) > 0
+        assert res.boundary_count > 0 and res.labeled_size is None
 
 
 # ---------------------------------------------------------------------------
@@ -326,7 +330,10 @@ def test_pipeline_structure(r3, r4):
         assert all(mutation_class_id(mc.canonical_rep) == mcid for mcid, mc in r.classes.items())
     assert all(is_skew_symmetric(mc.canonical_rep) and is_bounded(mc.canonical_rep)
                for mc in r4.classes.values())
-    assert all(mc.labeled_size > 0 for mc in r4.classes.values())
+    assert all(mc.distinct_quiver_count > 0 for mc in r4.classes.values())
+    # every complete class at n<=4 is small enough to carry its labeled orbit
+    assert all((mc.labeled_size or 0) > 0 for mc in r4.classes.values() if mc.exploration == "complete")
+    assert all(mc.labeled_size is None for mc in r4.classes.values() if mc.exploration != "complete")
 
 
 def test_pipeline_known_results(r4):
@@ -383,8 +390,8 @@ def _simulate_union(orbits):
 
 def _orbit(*ms, is_open):
     ids = [quiver_id(m) for m in ms]
-    return _RawOrbit(labeled_quivers=list(ms), quiver_ids=ids, qid_set=set(ids),
-                     is_open=is_open, boundary_quivers=[ms[0]] if is_open else [])
+    return _RawOrbit(members=list(ms), quiver_ids=ids, qid_set=set(ids),
+                     is_open=is_open, boundary_count=1 if is_open else 0, crossed=is_open)
 
 
 def test_union_find_rejects_closed_merges():

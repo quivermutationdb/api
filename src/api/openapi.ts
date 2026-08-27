@@ -19,6 +19,7 @@ const FILTER_PARAMS = [
   p("is_simply_laced", "boolean", "All |b_ij| <= 1."),
   p("is_mutation_finite", "boolean", "true: proved mutation-finite; false: proved mutation-infinite. Undetermined classes match neither."),
   p("nickname", "string", "Curated class nickname slug, e.g. markov."),
+  p("explored", "boolean", "Only quivers with (true) / without (false) an explored mutation class."),
 ];
 const PAGE_PARAMS = [
   p("limit", "integer", "Page size (max 1000)."),
@@ -88,6 +89,10 @@ export const OPENAPI = {
     "/random/quiver": { get: { summary: "A uniformly random quiver id", operationId: "randomQuiver", responses: ok("Pick", "RandomQuiver") } },
     "/random/class": { get: { summary: "A uniformly random mutation class id", operationId: "randomClass", responses: ok("Pick", "RandomClass") } },
     "/nicknames": { get: { summary: "Curated class nicknames", operationId: "listNicknames", responses: ok("Nicknames", "NicknameList") } },
+    "/lookup": { get: { summary: "Find a quiver by exchange matrix (canonicalise -> id -> row)", operationId: "lookupQuiver",
+      parameters: [p("matrix", "string", "JSON skew-symmetric integer matrix, e.g. [[0,1],[-1,0]]")],
+      responses: { ...ok("Canonical id + row if present", "Lookup"), ...badRequest } },
+      post: { summary: "Same as GET with a JSON body {matrix}", operationId: "lookupQuiverPost", responses: { ...ok("Canonical id + row if present", "Lookup"), ...badRequest } } },
     "/export.ndjson": { get: { summary: "Bulk pull of a filtered cut as NDJSON (resumable via X-Next-Cursor)", operationId: "exportNdjson",
       description: "With `limit` (<= 5000): returns up to that many rows and an `X-Next-Cursor` header (empty when done); pass it back as `cursor`. Without `limit`: streams the whole cut. Rows have the CSV export's columns (see EXPORT_COLUMNS in /export).",
       parameters: [...FILTER_PARAMS, p("scope", "string", "distinct | labelings"), p("limit", "integer", "<= 5000; omit to stream everything"), p("cursor", "string", "resume cursor")],
@@ -110,6 +115,8 @@ export const OPENAPI = {
         class_size: { type: ["integer", "null"], description: "labeled orbit size when exploration = complete, else null" },
         explored_size: { type: ["integer", "null"] }, mc_id: { type: ["string", "null"] },
         nickname: { type: ["string", "null"] }, nickname_slug: { type: ["string", "null"] },
+        mutation_finite: { $ref: "#/components/schemas/TriState", description: "known even without an explored class (Derksen–Owen)" },
+        explored: { type: "boolean", description: "whether this quiver's mutation class was explored (has a class row)" },
         labeling_ord: { type: "integer", description: "only in scope=labelings" } } },
       QuiverDetail: { allOf: [{ $ref: "#/components/schemas/Quiver" }, { type: "object", properties: {
         label: { type: ["string", "null"] }, is_abundant: { $ref: "#/components/schemas/TriState" }, is_planar: { $ref: "#/components/schemas/TriState" },
@@ -135,6 +142,7 @@ export const OPENAPI = {
       LabelingList: { type: "object", properties: { items: { type: "array", items: { type: "object", properties: { ord: { type: "integer" }, qmd_id: { type: "string" }, mc_id: { type: "string" }, matrix: { $ref: "#/components/schemas/Matrix" } } } }, next_cursor: { type: ["string", "null"] } } },
       Stats: { type: "object", properties: { distinct_quivers: { type: "integer" }, labeled_quivers: { type: "integer" }, mutation_classes: { type: "integer" },
         by_rank: { type: "array", items: { type: "object", properties: { n: { type: "integer" }, distinct_quivers: { type: "integer" }, labeled_quivers: { type: "integer" }, mutation_classes: { type: "integer" }, bound: { type: ["integer", "null"] }, node_cap: { type: ["integer", "null"] }, generated_at: { type: ["string", "null"] }, pipeline_version: { type: ["string", "null"] }, generator: { type: ["string", "null"], description: "orderly (exact census) | brute | sample" }, census_size: { type: ["integer", "null"], description: "exact number of unlabeled quivers in the cell (n, bound); compare with distinct_quivers to see coverage" } } } } } },
+      Lookup: { type: "object", properties: { qmd_id: { type: "string" }, num_vertices: { type: "integer" }, canonical_matrix: { $ref: "#/components/schemas/Matrix" }, is_connected: { type: "boolean" }, max_edge: { type: "integer" }, found: { type: "boolean" }, quiver: { anyOf: [{ $ref: "#/components/schemas/QuiverDetail" }, { type: "null" }] } } },
       RandomQuiver: { type: "object", properties: { qmd_id: { type: "string" }, num_vertices: { type: "integer" } } },
       RandomClass: { type: "object", properties: { mc_id: { type: "string" }, num_vertices: { type: "integer" } } },
       NicknameList: { type: "object", properties: { items: { type: "array", items: { type: "object", properties: { mc_id: { type: "string" }, nickname: { type: "string" }, slug: { type: "string" }, note: { type: ["string", "null"] }, num_vertices: { type: ["integer", "null"] }, dynkin_type: { type: ["string", "null"] } } } }, total: { type: "integer" } } },

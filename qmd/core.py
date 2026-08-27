@@ -71,18 +71,26 @@ Gluing algorithm
 import hashlib
 import json
 from collections import defaultdict, deque
+import math
 from dataclasses import dataclass, field
 from itertools import permutations, product
 from typing import Iterable, Optional
 
+from functools import lru_cache
+
 from qmd.canonicalize import (  # noqa: F401  (re-exported for callers)
-    canonical_form,
+    canonical_form as _canonical_form_uncached,
     are_isomorphic,
     active_backend,
     verify_with_fallback,
     _apply_permutation,
     _lex_key,
 )
+
+
+# Canonical forms are needed twice per orbit member (id, then class rep) and
+# often more; memoise per process (workers fork with a warm cache).
+canonical_form = lru_cache(maxsize=1 << 18)(_canonical_form_uncached)
 
 
 # ---------------------------------------------------------------------------
@@ -315,23 +323,97 @@ class _UnionFind:
 @dataclass
 class _RawOrbit:
     """
-    The direct output of a single BFS from one seed.
-    Multiple raw orbits may be glued into one MutationClassResult.
+    The direct output of one *unlabeled* BFS from one seed: the distinct
+    quivers (canonical forms) reachable by bounded mutation. Multiple raw
+    orbits may be glued into one MutationClassResult.
     """
-    labeled_quivers : list[Matrix]
-    quiver_ids      : list[str]       # parallel to labeled_quivers
+    members         : list[Matrix]    # distinct canonical forms, lex-sorted
+    quiver_ids      : list[str]       # parallel to members
     qid_set         : set[str]        # fast membership test
     is_open         : bool            # crossed the weight bound OR was truncated
-    boundary_quivers: list[Matrix]
+    boundary_count  : int             # members with an escaping mutation
     truncated       : bool = False    # stopped by the node cap before any crossing
     crossed         : bool = False    # some mutation crossed the weight bound
 
 
-def _bfs_orbit(seed: Matrix, bound: int = 2,
-               node_cap: Optional[int] = None) -> _RawOrbit:
+def _bfs_unlabeled(seed: Matrix, bound: int = 2,
+                   node_cap: Optional[int] = None) -> _RawOrbit:
     """
-    BFS over all matrices reachable from `seed` by bounded mutation.
-    Returns the raw labeled orbit without any gluing.
+    BFS over the *unlabeled* mutation class of `seed`: every mutation result is
+    canonicalised, so each quiver is visited once regardless of labeling.
+    Mutation commutes with relabeling, so the set of quivers reached equals
+    the projection of the labeled orbit — same class membership and the same
+    MC id (lex-min over members) as a labeled search, at a fraction of the
+    cost (E8: 1,574 quivers instead of tens of millions of labeled matrices).
+
+    `node_cap` bounds the number of distinct quivers visited; see _bfs_orbit
+    for the crossed / truncated semantics.
+    """
+    assert is_skew_symmetric(seed), "Seed must be skew-symmetric"
+    assert is_bounded(seed, bound), \
+        f"Seed already violates the bound |b_ij| <= {bound}"
+
+    start = canonical_form(seed)
+    visited: set[Matrix] = {start}
+    queue: deque[Matrix] = deque([start])
+    crossed = False
+    truncated = False
+    boundary = 0
+
+    while queue:
+        current = queue.popleft()
+        at_boundary = False
+        for k in range(len(current)):
+            mutated = mutate(current, k)
+            if not is_bounded(mutated, bound):
+                crossed = True
+                at_boundary = True
+                continue
+            cf = canonical_form(mutated)
+            if cf in visited:
+                continue
+            if node_cap is not None and len(visited) >= node_cap:
+                truncated = True          # never exceed the cap; keep scanning for crossings
+                continue
+            visited.add(cf)
+            queue.append(cf)
+        if at_boundary:
+            boundary += 1
+        if truncated and not crossed and len(visited) >= node_cap:
+            # Nothing more may be added; the remaining queue can only add
+            # members, so stop (crossings already seen are recorded).
+            pass
+
+    members = sorted(visited)
+    qids = [quiver_id(m) for m in members]
+    return _RawOrbit(
+        members        = members,
+        quiver_ids     = qids,
+        qid_set        = set(qids),
+        is_open        = crossed or truncated,
+        boundary_count = boundary,
+        truncated      = truncated and not crossed,
+        crossed        = crossed,
+    )
+
+
+@dataclass
+class _LabeledOrbit:
+    """Output of the labeled BFS: every reachable labeled exchange matrix."""
+    labeled_quivers : list[Matrix]
+    quiver_ids      : list[str]       # parallel to labeled_quivers
+    is_open         : bool
+    boundary_quivers: list[Matrix]
+    truncated       : bool = False
+    crossed         : bool = False
+
+
+def _bfs_orbit(seed: Matrix, bound: int = 2,
+               node_cap: Optional[int] = None) -> _LabeledOrbit:
+    """
+    BFS over all *labeled* matrices reachable from `seed` by bounded mutation.
+    Used only for completely explored classes small enough to store every
+    labeling (see LABELED_MAX); class discovery itself is _bfs_unlabeled.
 
     `node_cap` bounds the number of labeled matrices visited. If the cap is
     reached *without* any mutation having crossed the weight bound, the orbit
@@ -373,10 +455,9 @@ def _bfs_orbit(seed: Matrix, bound: int = 2,
 
     labeled = sorted(visited)
     qids    = [quiver_id(m) for m in labeled]
-    return _RawOrbit(
+    return _LabeledOrbit(
         labeled_quivers  = labeled,
         quiver_ids       = qids,
-        qid_set          = set(qids),
         is_open          = is_open or truncated,
         boundary_quivers = sorted(boundary),
         truncated        = truncated and not is_open,
@@ -388,119 +469,104 @@ def _bfs_orbit(seed: Matrix, bound: int = 2,
 # MutationClassResult  (post-gluing)
 # ---------------------------------------------------------------------------
 
+# A finite class gets its full labeled orbit only when it is small enough:
+# distinct quivers x n! bounds the labeled orbit size.
+LABELED_MAX = 200_000
+
+
 @dataclass
 class MutationClassResult:
     """
     A fully-merged mutation class.
 
-    Attributes
-    ----------
-    labeled_quivers : list[Matrix]
-        Union of all labeled matrices from every merged BFS orbit.
-        For A3 this is 14 entries.  For a glued class it is the union
-        of the contributing orbits' labeled matrices (duplicates removed).
+    members / quiver_ids
+        The distinct quivers of the explored class (canonical forms, lex-
+        sorted) and their Q.* ids, parallel.
 
-    quiver_ids : list[str]
-        Parallel to labeled_quivers.  labeled_quivers[i] maps to
-        quiver_ids[i].  Multiple entries may share the same Q.* id
-        (same unlabeled quiver under different vertex labelings).
+    canonical_rep / mc_id
+        Lex-min over all members (= over all relabelings of all labeled
+        matrices in the class); MC.* id derived from it.
 
-    canonical_rep : Matrix
-        Lex-min over all vertex relabelings of all labeled_quivers.
-        Recomputed after gluing.
+    exploration : 'complete' | 'bound' | 'truncated'   (see _bfs_unlabeled)
+    is_open     : exploration != 'complete'
 
-    mc_id : str
-        MC.* id derived from canonical_rep.
+    labeled_quivers / labeled_ids
+        Every labeled exchange matrix of the class, computed only for
+        completely explored classes with distinct * n! <= LABELED_MAX;
+        otherwise empty lists and labeled_size is None.
 
-    is_open : bool
-        True if ANY constituent orbit hit the |b_ij| > bound boundary.
-
-    boundary_quivers : list[Matrix]
-        Union of boundary_quivers from all constituent orbits.
-
-    merged_orbit_count : int
-        Number of raw BFS orbits that were glued to form this class.
-        1 means no gluing occurred.
-
-    exploration : str
-        'complete'  — the bounded class was drained (finite, exact size)
-        'bound'     — some mutation crossed the weight bound (partial)
-        'truncated' — the node cap stopped a BFS (partial; finiteness unknown)
+    boundary_count : members that have an escaping (bound-crossing) mutation.
+    merged_orbit_count : raw BFS orbits glued into this class (1 = no gluing).
     """
-    labeled_quivers    : list[Matrix]
+    members            : list[Matrix]
     quiver_ids         : list[str]
     canonical_rep      : Matrix
     mc_id              : str
     is_open            : bool
-    boundary_quivers   : list[Matrix] = field(default_factory=list)
-    merged_orbit_count : int = 1
     exploration        : str = "complete"
+    boundary_count     : int = 0
+    merged_orbit_count : int = 1
+    labeled_quivers    : list[Matrix] = field(default_factory=list)
+    labeled_ids        : list[str] = field(default_factory=list)
 
     @property
-    def labeled_size(self) -> int:
-        return len(self.labeled_quivers)
+    def labeled_size(self) -> Optional[int]:
+        return len(self.labeled_quivers) if self.labeled_quivers else None
 
     @property
     def distinct_quiver_count(self) -> int:
-        return len(set(self.quiver_ids))
+        return len(self.members)
+
+    @property
+    def has_labelings(self) -> bool:
+        return bool(self.labeled_quivers)
 
 
-def _merge_orbits(orbits: list[_RawOrbit]) -> MutationClassResult:
+def _labeled_orbit_for(rep: Matrix, bound: int) -> tuple[list[Matrix], list[str]]:
+    """Full labeled orbit of a finite class (BFS from its canonical rep)."""
+    orbit = _bfs_orbit(rep, bound)
+    assert not orbit.is_open, "labeled BFS of a complete class must drain"
+    return orbit.labeled_quivers, orbit.quiver_ids
+
+
+def _merge_orbits(orbits: list[_RawOrbit], bound: int = 2,
+                  labeled_max: int = LABELED_MAX) -> MutationClassResult:
     """
-    Merge a list of _RawOrbit objects (already determined to belong to
-    the same mutation class) into a single MutationClassResult.
-
-    Deduplicates labeled matrices across orbits (a matrix appearing in
-    two orbits is stored once).  Recomputes canonical_rep and mc_id
-    from the merged labeled set.
+    Merge raw (unlabeled) orbits already known to belong to one class.
+    Deduplicates members, derives the exploration state, computes the
+    canonical rep / MC id, and — for small complete classes — the labeled orbit.
     """
-    seen_labeled : set[Matrix] = set()
-    seen_boundary: set[Matrix] = set()
-    merged_labeled  : list[Matrix] = []
-    merged_qids     : list[str]    = []
-    merged_boundary : list[Matrix] = []
-    is_open = False
-    truncated = False
-    crossed = False
-
+    seen: set[Matrix] = set()
+    members: list[Matrix] = []
+    qids: list[str] = []
+    is_open = truncated = crossed = False
+    boundary = 0
     for orbit in orbits:
         is_open = is_open or orbit.is_open
         truncated = truncated or orbit.truncated
         crossed = crossed or orbit.crossed
-        for m, qid in zip(orbit.labeled_quivers, orbit.quiver_ids):
-            if m not in seen_labeled:
-                seen_labeled.add(m)
-                merged_labeled.append(m)
-                merged_qids.append(qid)
-        # Boundary quivers are a subset of the labeled set (each is an interior
-        # quiver with an escaping mutation), so dedup them among themselves.
-        for b in orbit.boundary_quivers:
-            if b not in seen_boundary:
-                seen_boundary.add(b)
-                merged_boundary.append(b)
+        boundary += orbit.boundary_count
+        for m, qid in zip(orbit.members, orbit.quiver_ids):
+            if m not in seen:
+                seen.add(m)
+                members.append(m)
+                qids.append(qid)
+    order = sorted(range(len(members)), key=lambda i: members[i])
+    members = [members[i] for i in order]
+    qids = [qids[i] for i in order]
 
-    # Deterministic member order (lex) regardless of which orbits were glued.
-    order = sorted(range(len(merged_labeled)), key=lambda i: merged_labeled[i])
-    merged_labeled = [merged_labeled[i] for i in order]
-    merged_qids    = [merged_qids[i] for i in order]
-    merged_boundary.sort()
-
-    canon_rep = canonical_class_rep(merged_labeled)
-    mc_id_str = mutation_class_id(canon_rep)
-
-    return MutationClassResult(
-        labeled_quivers    = merged_labeled,
-        quiver_ids         = merged_qids,
-        canonical_rep      = canon_rep,
-        mc_id              = mc_id_str,
-        is_open            = is_open,
-        boundary_quivers   = merged_boundary,
-        merged_orbit_count = len(orbits),
-        # A crossing proves infinitude whatever else happened; 'truncated'
-        # means the cap hit with no crossing anywhere in the glued class.
-        exploration        = ("bound" if crossed
-                              else "truncated" if truncated else "complete"),
+    canon_rep = min(members, key=_lex_key)      # members are canonical already
+    exploration = "bound" if crossed else "truncated" if truncated else "complete"
+    result = MutationClassResult(
+        members=members, quiver_ids=qids, canonical_rep=canon_rep,
+        mc_id=mutation_class_id(canon_rep), is_open=is_open,
+        exploration=exploration, boundary_count=boundary,
+        merged_orbit_count=len(orbits),
     )
+    n = len(canon_rep)
+    if exploration == "complete" and len(members) * math.factorial(n) <= labeled_max:
+        result.labeled_quivers, result.labeled_ids = _labeled_orbit_for(canon_rep, bound)
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -521,8 +587,8 @@ def explore_mutation_class(seed: Matrix, bound: int = 2,
     seed  : starting exchange matrix (skew-symmetric and bounded)
     bound : maximum allowed |b_ij| at each step (default 2)
     """
-    orbit = _bfs_orbit(seed, bound, node_cap)
-    return _merge_orbits([orbit])
+    orbit = _bfs_unlabeled(seed, bound, node_cap)
+    return _merge_orbits([orbit], bound)
 
 
 # ---------------------------------------------------------------------------
@@ -609,9 +675,15 @@ class GenerationResult:
 
 
 def _bfs_one(args: tuple) -> tuple[str, _RawOrbit]:
-    """Worker: (seed qid, orbit) for one seed. Coverage is decided by the parent."""
+    """Worker: (seed qid, unlabeled orbit) for one seed. Coverage is decided by the parent."""
     seed, bound, node_cap = args
-    return quiver_id(seed), _bfs_orbit(seed, bound, node_cap)
+    return quiver_id(seed), _bfs_unlabeled(seed, bound, node_cap)
+
+
+def _labeled_one(args: tuple) -> tuple[str, list[Matrix], list[str]]:
+    mc_id, rep, bound = args
+    labeled, ids = _labeled_orbit_for(rep, bound)
+    return mc_id, labeled, ids
 
 
 def run_generation(max_vertices: int = 4, bound: int = 2,
@@ -687,7 +759,7 @@ def run_generation(max_vertices: int = 4, bound: int = 2,
             seed_qid = quiver_id(seed)
             if seed_qid in covered_qids:
                 continue
-            keep(seed_qid, _bfs_orbit(seed, bound, node_cap))
+            keep(seed_qid, _bfs_unlabeled(seed, bound, node_cap))
 
     # --- Phase 3: Union-Find gluing ---
     n_orbits = len(raw_orbits)
@@ -730,15 +802,31 @@ def run_generation(max_vertices: int = 4, bound: int = 2,
 
     # Collect components and merge
     components = uf.components(list(range(n_orbits)))
-    for root, members in components.items():
-        orbits_in_component = [raw_orbits[i] for i in members]
-        mc_result = _merge_orbits(orbits_in_component)
+    # Labeled orbits (small complete classes only) are the expensive part of
+    # merging, so they are computed in the pool when workers > 1.
+    merged: list[MutationClassResult] = []
+    for root, idxs in components.items():
+        merged.append(_merge_orbits([raw_orbits[i] for i in idxs], bound, labeled_max=0))
+    wanted = [(mc.mc_id, mc.canonical_rep, bound) for mc in merged
+              if mc.exploration == "complete"
+              and len(mc.members) * math.factorial(len(mc.canonical_rep)) <= LABELED_MAX]
+    if workers > 1 and len(wanted) > 1:
+        import multiprocessing as mp
+        by_id = {mc.mc_id: mc for mc in merged}
+        with mp.get_context("fork").Pool(workers) as pool:
+            for i, (mc_id, labeled, ids) in enumerate(pool.imap_unordered(_labeled_one, wanted, chunksize=4), 1):
+                by_id[mc_id].labeled_quivers, by_id[mc_id].labeled_ids = labeled, ids
+                if progress and (i % max(1, len(wanted) // 10) == 0 or i == len(wanted)):
+                    progress("labelings", i, len(wanted))
+    else:
+        for mc_id, rep, b in wanted:
+            mc = next(x for x in merged if x.mc_id == mc_id)
+            mc.labeled_quivers, mc.labeled_ids = _labeled_orbit_for(rep, b)
 
+    for mc_result in merged:
         result.classes[mc_result.mc_id] = mc_result
-
-        for m, qid in zip(mc_result.labeled_quivers, mc_result.quiver_ids):
-            if qid not in result.quivers:
-                result.quivers[qid] = canonical_form(m)
+        for m, qid in zip(mc_result.members, mc_result.quiver_ids):
+            result.quivers[qid] = m
             result.membership[qid] = mc_result.mc_id
 
     # --- Phase 4: Consistency assertions ---

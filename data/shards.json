@@ -1,0 +1,13 @@
+{
+  "$comment": "Which D1 database holds which rank. Read by the Python exporter (file naming + import-d1.sh) and mirrored by src/db/shard.ts (bindings). A rank may be split across several databases by the bucket of its id hash: bucket = parseInt(hash[0], 16) % buckets. Everything not listed lives in the main database.",
+  "main": { "binding": "DB", "database": "qmd" },
+  "split": {
+    "6": {
+      "buckets": 2,
+      "databases": [
+        { "binding": "DB_N6_0", "database": "qmd-n6-0" },
+        { "binding": "DB_N6_1", "database": "qmd-n6-1" }
+      ]
+    }
+  }
+}

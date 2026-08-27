@@ -14,8 +14,9 @@ import { z } from "zod";
 import { classDetail, classLabelings, classListParamsFrom, classQuivers, listClasses, slugToId } from "./api/classes";
 import { listParamsFrom, listQuivers, quiverDetail, quiverLabelings } from "./api/quivers";
 import { classNicknames as nick, mutationClasses as mc, rankStats } from "./db/schema";
-import { dbFor, dbForId } from "./db/shard";
+import { dbForId, mainDb } from "./db/shard";
 import { eq } from "drizzle-orm";
+import { lookupMatrix } from "./api/lookup";
 
 const json = (v: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(v) }] });
 const fail = (msg: string) => ({ content: [{ type: "text" as const, text: msg }], isError: true });
@@ -52,7 +53,7 @@ export function createQmdServer(env: Env) {
     description: "Dataset totals and, per rank, how the data was generated (weight bound, node cap, pipeline version, date).",
     inputSchema: {},
   }, async () => {
-    const rows = await dbFor(env, 0).select().from(rankStats).orderBy(asc(rankStats.n));
+    const rows = await mainDb(env).select().from(rankStats).orderBy(asc(rankStats.n));
     return json({
       distinct_quivers: rows.reduce((a, r) => a + r.quiverCount, 0),
       labeled_quivers: rows.reduce((a, r) => a + r.labeledQuiverCount, 0),
@@ -75,7 +76,7 @@ export function createQmdServer(env: Env) {
   }, async (args) => {
     try {
       const p = listParamsFrom(getter(args), 50);
-      return json(await listQuivers(dbFor(env, p.filters.rank ?? 0), p));
+      return json(await listQuivers(env, p));
     } catch (e) { return fail(String((e as Error).message)); }
   });
 
@@ -83,8 +84,7 @@ export function createQmdServer(env: Env) {
     description: "One quiver by id (Q.n{rank}.{hash}): canonical exchange matrix, invariants, class summary.",
     inputSchema: { id: z.string() },
   }, async ({ id }) => {
-    const db = dbForId(env, id);
-    const d = db ? await quiverDetail(db, id) : null;
+    const d = await quiverDetail(env, id);
     return d ? json(d) : fail(`No quiver ${id}`);
   });
 
@@ -93,8 +93,11 @@ export function createQmdServer(env: Env) {
     inputSchema: { id: z.string(), ...PAGING },
   }, async ({ id, limit, cursor }) => {
     const db = dbForId(env, id);
-    if (!db) return fail(`No quiver ${id}`);
-    return json({ qmd_id: id, ...(await quiverLabelings(db, id, cursor, limit ?? 100)) });
+    const row = db ? (await db.select({ mcId: mc.id }).from(mc).where(eq(mc.id, id)))[0] : undefined;
+    const qrow = db ? (await db.select({ mcId: (await import("./db/schema")).quivers.mutationClassId }).from((await import("./db/schema")).quivers).where(eq((await import("./db/schema")).quivers.id, id)))[0] : undefined;
+    if (!db || !qrow) return fail(`No quiver ${id}`);
+    void row;
+    return json({ qmd_id: id, ...(await quiverLabelings(env, id, qrow.mcId, cursor, limit ?? 100)) });
   });
 
   server.registerTool("list_classes", {
@@ -109,7 +112,7 @@ export function createQmdServer(env: Env) {
   }, async (args) => {
     try {
       const p = classListParamsFrom(getter(args));
-      return json(await listClasses(dbFor(env, p.rank ?? 0), p));
+      return json(await listClasses(env, p));
     } catch (e) { return fail(String((e as Error).message)); }
   });
 
@@ -120,12 +123,11 @@ export function createQmdServer(env: Env) {
   }, async ({ id_or_slug }) => {
     let id = id_or_slug;
     if (!/^MC\.n\d+\./.test(id)) {
-      const resolved = await slugToId(dbFor(env, 0), id);
+      const resolved = await slugToId(env, id);
       if (!resolved) return fail(`No class with nickname ${id}`);
       id = resolved;
     }
-    const db = dbForId(env, id);
-    const d = db ? await classDetail(db, id) : null;
+    const d = await classDetail(env, id);
     return d ? json(d) : fail(`No class ${id}`);
   });
 
@@ -140,15 +142,24 @@ export function createQmdServer(env: Env) {
     if (!row) return fail(`No class ${id}`);
     const lim = limit ?? 100;
     return json({ mc_id: id, ...(kind === "labelings"
-      ? await classLabelings(db, id, qmd_id, cursor, lim)
-      : await classQuivers(db, id, row.canon, cursor, lim)) });
+      ? await classLabelings(env, id, qmd_id, cursor, lim)
+      : await classQuivers(env, id, row.canon, cursor, lim)) });
+  });
+
+  server.registerTool("lookup_quiver", {
+    description: "Find the quiver a skew-symmetric exchange matrix represents: returns its canonical (lex-min) "
+      + "matrix and Q.* id, and the database row if the census contains it (found=false otherwise). "
+      + "b_ij > 0 means b_ij arrows i -> j.",
+    inputSchema: { matrix: z.array(z.array(z.number().int())).describe("square skew-symmetric integer matrix") },
+  }, async ({ matrix }) => {
+    try { return json(await lookupMatrix(env, matrix)); } catch (e) { return fail(String((e as Error).message)); }
   });
 
   server.registerTool("list_nicknames", {
     description: "Curated class nicknames (slug -> class id).",
     inputSchema: {},
   }, async () => {
-    const rows = await dbFor(env, 0).select().from(nick).orderBy(asc(nick.slug));
+    const rows = await mainDb(env).select().from(nick).orderBy(asc(nick.slug));
     return json({ items: rows.map((r) => ({ mc_id: r.mcId, nickname: r.nickname, slug: r.slug, note: r.note })) });
   });
 

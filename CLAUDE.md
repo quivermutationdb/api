@@ -22,22 +22,37 @@ git history. This file describes the current system.
   bound DB; future per-`n` shards change only that module. IDs encode the
   rank (`Q.n4.{sha256[:16]}`, `MC.n4.{sha256[:16]}`), so point lookups route
   by prefix.
-- **Schema v2** (`src/db/schema.ts`, migrations in `drizzle/`; design in
-  `docs/PHASE2.md`): skinny browse tables `quivers` and `mutation_classes`
-  with composite `(n, sortcol, id)` indexes matching the queries; **one row
-  per labeled matrix in `labelings`** and per frontier matrix in
-  `frontier_quivers` (D1 caps a row at 2 MB — orbits are never JSON blobs);
-  `mutation_classes.exploration` ∈ complete | bound | truncated; curated
-  `class_nicknames`; ingest-time aggregates + provenance in `rank_stats`
-  (homepage stats and `/random/*` come from there — never scans, never
-  `ORDER BY RANDOM()`); `downloads` logs exports.
+- **Schema v3** (`src/db/schema.ts`, migrations in `drizzle/`; design in
+  `docs/PHASE2.md` + `docs/PHASE3.md`): skinny browse tables `quivers` and
+  `mutation_classes`; matrices stored in the compact upper-triangular
+  encoding (`qmd/encoding.py` ↔ `src/db/matrix.ts`); rowid-based indexes
+  (rows are inserted in id order per rank, so `(n, rowid)` is id order and
+  cursors use rowid); per-quiver `mutation_finite` (three-state, known even
+  without a class row via Derksen–Owen) and `mutation_class_id` NULL for
+  unexplored quivers; **one row per labeled matrix in `labelings`, stored only
+  for complete classes with distinct × n! ≤ 200k** (`class_size` NULL
+  otherwise); `mutation_classes.exploration` ∈ complete | bound | truncated;
+  curated `class_nicknames`; ingest-time aggregates + provenance in
+  `rank_stats` (+ per-shard counts); `downloads` logs exports.
+- **Sharding** (`data/shards.json`, `src/db/shard.ts`): one main database +
+  per-rank split databases (rank 6: `qmd-n6-0/1` by id-hash bucket). Lists
+  query every shard of the rank and merge (`src/api/merge.ts`); a class and
+  its labelings live in the class id's shard; `scripts/migrate-all.sh`
+  migrates every shard; `scripts/import-d1.sh` routes parts by manifest.
+- **The census is of connected quivers only.** Class discovery is an
+  *unlabeled* BFS (`qmd/core._bfs_unlabeled`, canonicalise every mutation
+  result); the exploration bound is the constant `EXPLORE_BOUND = 2` (the
+  wall at 3 is the Derksen–Owen witness); a wall crossing beats the node cap.
+  Never explore labeled orbits at rank ≥ 6 (E8's is ~6×10⁷ matrices).
 - **Every list is keyset-paged** (`next_cursor` / `?cursor=`, `src/api/cursor.ts`);
   class members are served by `/classes/{id}/quivers` and `/classes/{id}/labelings`;
   the class detail embeds only the first member page and inlines labelings only
   for classes ≤ 200 matrices. Never load a whole orbit in the Worker (128 MB).
 - **Agents**: `/mcp` (stateless MCP server, `src/mcp.ts`, tools wrap the API
   functions), `/api/openapi.json` (`src/api/openapi.ts`, keep in step with
-  routes), `/api/export.ndjson` (resumable bulk pull), `public/llms.txt`.
+  routes), `/api/export.ndjson` (resumable bulk pull), `public/llms.txt`,
+  `/api/lookup` (paste a matrix → canonical id → row; `src/canon.ts` is the
+  TS port of the lex-min definition and must stay identical to Python's).
 - **The Python math pipeline stays Python and stays offline.** `qmd/core.py`
   (mutation, canonical hashing, BFS generation) never runs on Cloudflare.
   Keep the Worker lean: no heavy computation, no matrix math server-side —
@@ -50,11 +65,17 @@ git history. This file describes the current system.
 ## Data pipeline (offline → D1)
 
 ```bash
-python scripts/populate.py --count-only --max-vertices 10 --bound 2   # exact cell sizes first!
-python scripts/populate.py --export-d1 dist/d1 --max-vertices 5 --bound 2 --node-cap 500 --workers 8
-python scripts/populate.py --export-d1 dist/d1 --ranks 7 --bound 2 --generator sample --sample 200000 --node-cap 200
-scripts/import-d1.sh dist/d1 --remote          # parts in order, ranks ascending
+python scripts/populate.py --count-only --max-vertices 10 --bound 2   # exact (connected) cell sizes first!
+python scripts/populate.py --export-d1 dist/d1 --ranks 4 --bound 10 --node-cap 100 --workers 8
+python scripts/populate.py --export-d1 dist/d1 --ranks 8 --bound 1 --generator sample --sample 1000000 --node-cap 100 --workers 8
+python -c "from qmd.bigcell import export_big_cell; export_big_cell('dist/d1', n=6, h=2, sample=1_000_000, workers=8)"
+scripts/import-d1.sh dist/d1 --remote          # parts in order, ranks ascending, right database per part
 ```
+
+The agreed cells and the cost model are in docs/PHASE3.md §1/§3. Seeds
+with an entry |b_ij| ≥ 3 are marked mutation-infinite without exploration;
+rank 6 runs through the streaming pipeline (`qmd/bigcell.py`, scratch
+SQLite, resumable stages) with class rows only for a sample.
 
 Seeds come from `qmd/census.py`: **orderly generation** (exact census of the
 cell (n, bound); parallel) or **sampling** for cells that are not finite jobs

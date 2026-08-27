@@ -59,6 +59,10 @@ def main() -> None:
     parser.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 2) - 2),
                         help="Process-pool size for generation, BFS and invariants "
                              "(default: CPUs - 2).")
+    parser.add_argument("--la-timeout", type=float, default=1.0,
+                        help="Seconds per Banff/Louise/P' search for OPEN classes "
+                             "(0 = skip them, stored as unknown; finite classes always "
+                             "get the full budget). Default 1.")
     parser.add_argument("--count-only", action="store_true",
                         help="Print the exact cell sizes (Burnside) and exit.")
     args = parser.parse_args()
@@ -70,7 +74,7 @@ def main() -> None:
             print(f"  n={n:<2} |b_ij|<={args.bound}: {count_quivers(n, args.bound):,} unlabeled quivers")
         return
 
-    from qmd.d1_export import export_ranks
+    from qmd.d1_export import export_ranks  # noqa: E402
     ranks = [int(r) for r in args.ranks.split(",")] if args.ranks else None
     print(f"Exporting D1 SQL to {args.export_d1} "
           f"(ranks {ranks or f'1..{args.max_vertices}'}, "
@@ -82,7 +86,7 @@ def main() -> None:
                  bound=args.bound, ranks=ranks, force=args.force,
                  node_cap=args.node_cap, generator=args.generator,
                  sample=args.sample, sample_seed=args.sample_seed,
-                 workers=args.workers, **kwargs)
+                 workers=args.workers, la_timeout=args.la_timeout, **kwargs)
     print("Done.")
 
 

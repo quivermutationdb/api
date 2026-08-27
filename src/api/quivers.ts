@@ -1,15 +1,17 @@
 /**
- * Quiver listing machinery + /quivers routes.
+ * Quiver listing machinery + /quivers routes (schema v3, sharded).
  *
  * The list envelope and item shapes mirror the legacy FastAPI backend
- * (git history: qmd/schemas.py, qmd/crud.py): qmd_id, num_vertices,
- * exchange_matrix, class_size (null => rendered as ∞), ... — with additive
- * fields (`nickname`, `exploration`, `next_cursor`) for phase 2.
- * The same filter set serves /quivers, /search, /export and the MCP tools.
+ * (qmd_id, num_vertices, exchange_matrix, class_size (null => ∞), ...) with
+ * additive phase-2/3 fields (nickname, exploration, mutation_finite,
+ * next_cursor). Matrices are stored compactly and decoded here. Lists run
+ * per shard (src/db/shard.ts) and are merged by sort key (src/api/merge.ts);
+ * the rowid is the unique tiebreak (rows are inserted in id order per rank).
  */
 
 import { and, eq, gt, lte, sql, type SQL } from "drizzle-orm";
 import { Hono, type Context } from "hono";
+import { decodeUpper } from "../db/matrix";
 import {
   classNicknames as nick,
   labelings as lab,
@@ -18,11 +20,14 @@ import {
   rankStats,
   type Matrix,
 } from "../db/schema";
-import { dbFor, dbForId, type Database } from "../db/shard";
-import { afterKey, decodeCursor, encodeCursor, orderBy } from "./cursor";
+import { dbForId, dbOf, mainDb, shardsForRank, type Database, type Shard } from "../db/shard";
+import { afterKey, decodeCursor, encodeCursor, orderBy, type Dir, type Key, type KeyCol } from "./cursor";
 import { BadRequest, parseBool, parseDir, parseInteger, parsePaging } from "./errors";
+import { mergeShards } from "./merge";
 
 export { BadRequest } from "./errors";
+
+const Q_ROWID = sql`${q}.rowid`;
 
 // ---------------------------------------------------------------------------
 // Filters
@@ -41,6 +46,7 @@ export interface ListFilters {
   isSimplyLaced?: boolean;
   isMutationFinite?: boolean;
   nickname?: string;
+  explored?: boolean;
 }
 
 /** Parse the shared filter set from query params (union of /quivers + /search). */
@@ -58,6 +64,7 @@ export function parseFilters(get: (k: string) => string | undefined): ListFilter
     isSimplyLaced: parseBool("is_simply_laced", get("is_simply_laced")),
     isMutationFinite: parseBool("is_mutation_finite", get("is_mutation_finite")),
     nickname: get("nickname") || undefined,
+    explored: parseBool("explored", get("explored")),
   };
 }
 
@@ -70,44 +77,36 @@ export function filtersAsRecord(f: ListFilters): Record<string, unknown> {
     is_open: f.isOpen, orbit_min: f.orbitMin, orbit_max: f.orbitMax,
     is_acyclic: f.isAcyclic, is_connected: f.isConnected,
     is_simply_laced: f.isSimplyLaced, is_mutation_finite: f.isMutationFinite,
-    nickname: f.nickname,
+    nickname: f.nickname, explored: f.explored,
   })) {
     if (v !== undefined) out[k] = v;
   }
   return out;
 }
 
-/** WHERE conditions matching the legacy backend's _filtered_quivers. */
+/** WHERE conditions (the legacy backend's _filtered_quivers, extended). */
 export function filterConditions(f: ListFilters): SQL[] {
   const conds: SQL[] = [];
   if (f.rank !== undefined) conds.push(eq(q.n, f.rank));
   if (f.maxEdge !== undefined) conds.push(eq(q.maxEdge, f.maxEdge));
   if (f.isAcyclic !== undefined) conds.push(eq(q.isAcyclic, f.isAcyclic));
   if (f.isConnected !== undefined) conds.push(eq(q.isConnected, f.isConnected));
-  if (f.isSimplyLaced !== undefined) {
-    conds.push(f.isSimplyLaced ? lte(q.maxEdge, 1) : gt(q.maxEdge, 1));
+  if (f.isSimplyLaced !== undefined) conds.push(f.isSimplyLaced ? lte(q.maxEdge, 1) : gt(q.maxEdge, 1));
+  // Per-quiver finiteness is known even without a class row (Derksen–Owen).
+  if (f.isMutationFinite !== undefined) conds.push(eq(q.mutationFinite, f.isMutationFinite));
+  if (f.explored !== undefined) {
+    conds.push(f.explored ? sql`${q.mutationClassId} is not null` : sql`${q.mutationClassId} is null`);
   }
-  // Class-side filters exclude quivers without a class (a comparison against
-  // a NULL outer-join row never matches).
+  // Class-side filters exclude quivers without an explored class.
   if (f.isOpen !== undefined) conds.push(eq(mc.isOpen, f.isOpen));
-  // Mutation-finiteness filters on the *proved* columns, never on is_open:
-  // a class that is only is_infinite_expected (or truncated) matches neither.
-  if (f.isMutationFinite !== undefined) {
-    conds.push(f.isMutationFinite
-      ? eq(mc.isFiniteConfirmed, true)
-      : eq(mc.isInfiniteConfirmed, true));
-  }
   if (f.dynkinType !== undefined) conds.push(eq(mc.dynkinType, f.dynkinType));
-  if (f.representationType !== undefined) {
-    conds.push(eq(q.representationType, f.representationType));
-  }
+  if (f.representationType !== undefined) conds.push(eq(q.representationType, f.representationType));
   if (f.orbitMin !== undefined) conds.push(sql`${mc.classSize} >= ${f.orbitMin}`);
   if (f.orbitMax !== undefined) conds.push(sql`${mc.classSize} <= ${f.orbitMax}`);
   if (f.nickname !== undefined) conds.push(eq(nick.slug, f.nickname.toLowerCase()));
   return conds;
 }
 
-/** True when the cut is "everything" or "one rank" — totals then come from rank_stats. */
 function onlyRankFilter(f: ListFilters): boolean {
   return Object.keys(filtersAsRecord(f)).every((k) => k === "rank");
 }
@@ -134,17 +133,11 @@ export function parseSort(sort: string | undefined): SortKey {
   return key as SortKey;
 }
 
-/** ORDER BY columns for a sort: the sort column, then (n, id) as a unique tiebreak. */
-function sortColumns(key: SortKey, dir: "asc" | "desc") {
-  if (key === "num_vertices") return { cols: [q.n, q.id], dirs: [dir, "asc" as const] };
+/** ORDER BY columns for a sort: the sort column, then (n, rowid) as the unique tiebreak. */
+function sortColumns(key: SortKey, dir: Dir): { cols: KeyCol[]; dirs: Dir[] } {
+  if (key === "num_vertices") return { cols: [q.n, Q_ROWID], dirs: [dir, "asc"] };
   if (key === "qmd_id") return { cols: [q.id], dirs: [dir] };
-  return { cols: [SORT_COLUMNS[key], q.n, q.id], dirs: [dir, "asc" as const, "asc" as const] };
-}
-
-/** ORDER BY for a sort + direction (used by the export). */
-export function sortOrder(sort: string | undefined, dir: string | undefined) {
-  const s = sortColumns(parseSort(sort), parseDir(dir));
-  return orderBy(s.cols, s.dirs);
+  return { cols: [SORT_COLUMNS[key], q.n, Q_ROWID], dirs: [dir, "asc", "asc"] };
 }
 
 // ---------------------------------------------------------------------------
@@ -152,6 +145,7 @@ export function sortOrder(sort: string | undefined, dir: string | undefined) {
 // ---------------------------------------------------------------------------
 
 export const LIST_SELECTION = {
+  rowid: sql<number>`${q}.rowid`,
   id: q.id,
   n: q.n,
   exchangeMatrix: q.exchangeMatrix,
@@ -160,6 +154,7 @@ export const LIST_SELECTION = {
   isConnected: q.isConnected,
   isBipartite: q.isBipartite,
   labelingCount: q.labelingCount,
+  mutationFinite: q.mutationFinite,
   representationType: q.representationType,
   mcId: q.mutationClassId,
   mcIsOpen: mc.isOpen,
@@ -171,9 +166,9 @@ export const LIST_SELECTION = {
 };
 
 export type ListRow = {
-  id: string; n: number; exchangeMatrix: Matrix; maxEdge: number;
+  rowid: number; id: string; n: number; exchangeMatrix: string; maxEdge: number;
   isAcyclic: boolean; isConnected: boolean; isBipartite: boolean | null;
-  labelingCount: number | null; representationType: string | null;
+  labelingCount: number | null; mutationFinite: boolean | null; representationType: string | null;
   mcId: string | null; mcIsOpen: boolean | null; mcExploration: string | null;
   mcDynkinType: string | null; mcClassSize: number | null;
   nickname: string | null; nicknameSlug: string | null;
@@ -196,10 +191,12 @@ export function quiverListItem(row: ListRow, matrix?: Matrix) {
     is_connected: row.isConnected,
     is_bipartite: row.isBipartite,
     is_open: row.mcIsOpen ?? false,
-    exploration: row.mcExploration,
+    exploration: row.mcId ? row.mcExploration : null,
+    explored: row.mcId !== null,
+    mutation_finite: row.mutationFinite,
     class_size: classSize(row),
     explored_size: row.mcClassSize,
-    exchange_matrix: matrix ?? row.exchangeMatrix,
+    exchange_matrix: matrix ?? decodeUpper(row.n, row.exchangeMatrix),
     mc_id: row.mcId,
     nickname: row.nickname,
     nickname_slug: row.nicknameSlug,
@@ -210,6 +207,19 @@ function baseQuery(db: Database) {
   return db.select(LIST_SELECTION).from(q)
     .leftJoin(mc, eq(q.mutationClassId, mc.id))
     .leftJoin(nick, eq(nick.mcId, mc.id));
+}
+
+function keyValue(row: ListRow, col: unknown): string | number | null {
+  switch (col) {
+    case q.id: return row.id;
+    case q.n: return row.n;
+    case q.maxEdge: return row.maxEdge;
+    case mc.classSize: return row.mcClassSize;
+    case mc.dynkinType: return row.mcDynkinType;
+    case mc.isOpen: return row.mcIsOpen === null ? null : Number(row.mcIsOpen);
+    case Q_ROWID: return row.rowid;
+    default: throw new Error("unknown key column");
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -226,106 +236,97 @@ export interface ListParams {
   cursor?: string;
 }
 
-async function totalsFor(db: Database, f: ListFilters, where: SQL | undefined) {
+async function totalsFor(env: Env, f: ListFilters, where: SQL | undefined) {
   if (onlyRankFilter(f)) {
-    const rows = await db.select().from(rankStats)
+    const rows = await mainDb(env).select().from(rankStats)
       .where(f.rank !== undefined ? eq(rankStats.n, f.rank) : undefined);
     return {
       distinct: rows.reduce((a, r) => a + r.quiverCount, 0),
       labeled: rows.reduce((a, r) => a + r.labeledQuiverCount, 0),
     };
   }
-  return (await db
-    .select({
-      distinct: sql<number>`count(*)`,
-      labeled: sql<number>`coalesce(sum(${q.labelingCount}), 0)`,
-    })
-    .from(q).leftJoin(mc, eq(q.mutationClassId, mc.id))
-    .leftJoin(nick, eq(nick.mcId, mc.id))
-    .where(where))[0] ?? { distinct: 0, labeled: 0 };
+  const per = await Promise.all(shardsForRank(f.rank).map((s) => dbOf(env, s)
+    .select({ distinct: sql<number>`count(*)`, labeled: sql<number>`coalesce(sum(${q.labelingCount}), 0)` })
+    .from(q).leftJoin(mc, eq(q.mutationClassId, mc.id)).leftJoin(nick, eq(nick.mcId, mc.id))
+    .where(where)));
+  return {
+    distinct: per.reduce((a, r) => a + (r[0]?.distinct ?? 0), 0),
+    labeled: per.reduce((a, r) => a + (r[0]?.labeled ?? 0), 0),
+  };
 }
 
-function keyValue(row: ListRow, col: unknown): string | number | null {
-  switch (col) {
-    case q.id: return row.id;
-    case q.n: return row.n;
-    case q.maxEdge: return row.maxEdge;
-    case mc.classSize: return row.mcClassSize;
-    case mc.dynkinType: return row.mcDynkinType;
-    case mc.isOpen: return row.mcIsOpen === null ? null : Number(row.mcIsOpen);
-    default: throw new Error("unknown key column");
-  }
-}
-
-export async function listQuivers(db: Database, p: ListParams) {
+export async function listQuivers(env: Env, p: ListParams) {
   const conds = filterConditions(p.filters);
   const sortKey = parseSort(p.sort);
   const dir = parseDir(p.dir);
   const where = conds.length ? and(...conds) : undefined;
-  const totals = await totalsFor(db, p.filters, where);
+  const totals = await totalsFor(env, p.filters, where);
+  const shards = shardsForRank(p.filters.rank);
 
   if (p.scope === "labelings") {
     if (sortKey !== "num_vertices" || dir !== "asc") {
       throw new BadRequest("scope=labelings supports only the default sort (num_vertices asc)");
     }
-    const r = await listLabelings(db, conds, p);
+    const r = await listLabelings(env, shards, conds, p);
     return { items: r.items, total: totals.labeled, distinct_total: totals.distinct,
              labeled_total: totals.labeled, next_cursor: r.next_cursor };
   }
 
   const { cols, dirs } = sortColumns(sortKey, dir);
-  const after = decodeCursor(p.cursor, cols.length);
-  const fullWhere = after ? and(where, afterKey(cols, dirs, after)) : where;
-  const rows = (await baseQuery(db)
-    .where(fullWhere).orderBy(...orderBy(cols, dirs))
-    .offset(after ? 0 : p.offset).limit(p.limit + 1)) as ListRow[];
-
-  const page = rows.slice(0, p.limit);
-  const last = page[page.length - 1];
-  const next_cursor = rows.length > p.limit && last
-    ? encodeCursor(cols.map((c) => keyValue(last, c)))
-    : null;
+  const r = await mergeShards<ListRow>({
+    shardKeys: shards.map((s) => s.key),
+    dirs,
+    keyOf: (row) => cols.map((c) => keyValue(row, c)),
+    fetch: async (sk, after, limit) => (await baseQuery(dbOf(env, shards.find((s) => s.key === sk)!))
+      .where(after ? and(where, afterKey(cols, dirs, after)) : where)
+      .orderBy(...orderBy(cols, dirs)).limit(limit)) as ListRow[],
+    limit: p.limit, offset: p.offset, cursor: p.cursor,
+  });
   return {
-    items: page.map((r) => quiverListItem(r)),
+    items: r.items.map((row) => quiverListItem(row)),
     total: totals.distinct,
     distinct_total: totals.distinct,
     labeled_total: totals.labeled,
-    next_cursor,
+    next_cursor: r.next_cursor,
   };
 }
 
 /**
- * "labelings" scope: one row per labeled matrix, straight from the labelings
- * table in (n, id, ord) order — served by idx_q_n_id + idx_lab_qmd_ord, no
- * in-memory walk. Keyset key: [n, qmd_id, ord].
+ * "labelings" scope: one row per labeled matrix (complete classes only),
+ * from the labelings table in (n, quiver rowid, ord) order. Key: [n, rowid, ord].
  */
-async function listLabelings(db: Database, conds: SQL[], p: ListParams) {
-  const cols = [q.n, q.id, lab.ord];
-  const dirs: ("asc" | "desc")[] = ["asc", "asc", "asc"];
-  const after = decodeCursor(p.cursor, 3);
-  const where = and(...conds, after ? afterKey(cols, dirs, after) : undefined);
-  const rows = await db
-    .select({ ...LIST_SELECTION, ord: lab.ord, labMatrix: lab.matrix })
-    .from(lab)
-    .innerJoin(q, eq(q.id, lab.qmdId))
-    .leftJoin(mc, eq(q.mutationClassId, mc.id))
-    .leftJoin(nick, eq(nick.mcId, mc.id))
-    .where(where).orderBy(...orderBy(cols, dirs))
-    .offset(after ? 0 : p.offset).limit(p.limit + 1);
-  const page = rows.slice(0, p.limit);
-  const last = page[page.length - 1];
+async function listLabelings(env: Env, shards: Shard[], conds: SQL[], p: ListParams) {
+  const cols: KeyCol[] = [q.n, Q_ROWID, lab.ord];
+  const dirs: Dir[] = ["asc", "asc", "asc"];
+  type Row = ListRow & { ord: number; labMatrix: string };
+  const r = await mergeShards<Row>({
+    shardKeys: shards.map((s) => s.key),
+    dirs,
+    keyOf: (row) => [row.n, row.rowid, row.ord],
+    fetch: async (sk, after, limit) => (await dbOf(env, shards.find((s) => s.key === sk)!)
+      .select({ ...LIST_SELECTION, ord: lab.ord, labMatrix: lab.matrix })
+      .from(lab).innerJoin(q, eq(q.id, lab.qmdId))
+      .leftJoin(mc, eq(q.mutationClassId, mc.id)).leftJoin(nick, eq(nick.mcId, mc.id))
+      .where(and(...conds, after ? afterKey(cols, dirs, after) : undefined))
+      .orderBy(...orderBy(cols, dirs)).limit(limit)) as Row[],
+    limit: p.limit, offset: p.offset, cursor: p.cursor,
+  });
   return {
-    items: page.map((r) => ({ ...quiverListItem(r as ListRow, r.labMatrix), labeling_ord: r.ord })),
-    next_cursor: rows.length > p.limit && last ? encodeCursor([last.n, last.id, last.ord]) : null,
+    items: r.items.map((row) => ({ ...quiverListItem(row, decodeUpper(row.n, row.labMatrix)), labeling_ord: row.ord })),
+    next_cursor: r.next_cursor,
   };
 }
 
 // ---------------------------------------------------------------------------
-// Labelings of one quiver (paged)
+// Labelings of one quiver (paged; a quiver's labelings live in its class's shard)
 // ---------------------------------------------------------------------------
 
-export async function quiverLabelings(db: Database, qmdId: string, cursor: string | undefined, limit: number) {
+export async function quiverLabelings(env: Env, qmdId: string, mcId: string | null,
+                                      cursor: string | undefined, limit: number) {
+  const db = mcId ? dbForId(env, mcId) : null;
+  if (!db) return { items: [], next_cursor: null };
   const after = decodeCursor(cursor, 1);
+  const n = Number(/^Q\.n(\d+)\./.exec(qmdId)?.[1] ?? 0);
   const rows = await db.select({ mcId: lab.mutationClassId, ord: lab.ord, matrix: lab.matrix })
     .from(lab)
     .where(and(eq(lab.qmdId, qmdId), after ? gt(lab.ord, after[0] as number) : undefined))
@@ -333,7 +334,7 @@ export async function quiverLabelings(db: Database, qmdId: string, cursor: strin
   const page = rows.slice(0, limit);
   const last = page[page.length - 1];
   return {
-    items: page.map((r) => ({ mc_id: r.mcId, ord: r.ord, matrix: r.matrix })),
+    items: page.map((r) => ({ mc_id: r.mcId, ord: r.ord, matrix: decodeUpper(n, r.matrix) })),
     next_cursor: rows.length > limit && last ? encodeCursor([last.ord]) : null,
   };
 }
@@ -350,11 +351,7 @@ export function listParamsFrom(get: (k: string) => string | undefined, defaultLi
     throw new BadRequest("scope must be 'distinct' or 'labelings'");
   }
   return {
-    filters: parseFilters(get),
-    scope,
-    sort: get("sort"),
-    dir: get("dir"),
-    cursor: get("cursor"),
+    filters: parseFilters(get), scope, sort: get("sort"), dir: get("dir"), cursor: get("cursor"),
     ...parsePaging(get, defaultLimit),
   };
 }
@@ -363,24 +360,19 @@ export function listParamsFrom(get: (k: string) => string | undefined, defaultLi
 export function listHandler(defaultLimit: number) {
   return async (c: Context<{ Bindings: Env }>) => {
     const params = listParamsFrom((k) => c.req.query(k), defaultLimit);
-    const db = dbFor(c.env, params.filters.rank ?? 0);
-    return c.json(await listQuivers(db, params));
+    return c.json(await listQuivers(c.env, params));
   };
 }
 
 quiversRoutes.get("/", listHandler(50));
 
-export async function quiverDetail(db: Database, id: string) {
+export async function quiverDetail(env: Env, id: string) {
+  const db = dbForId(env, id);
+  if (!db) return null;
   const row = (await db
-    .select({
-      ...LIST_SELECTION,
-      isAbundant: q.isAbundant,
-      isPlanar: q.isPlanar,
-      symmetryGroup: q.symmetryGroup,
-      mcLabel: mc.label,
-    })
-    .from(q).leftJoin(mc, eq(q.mutationClassId, mc.id))
-    .leftJoin(nick, eq(nick.mcId, mc.id))
+    .select({ ...LIST_SELECTION, isAbundant: q.isAbundant, isPlanar: q.isPlanar,
+              symmetryGroup: q.symmetryGroup, mcLabel: mc.label })
+    .from(q).leftJoin(mc, eq(q.mutationClassId, mc.id)).leftJoin(nick, eq(nick.mcId, mc.id))
     .where(eq(q.id, id)))[0];
   if (!row) return null;
   // Shape: the legacy QuiverDetail response, field for field (+ additive fields).
@@ -388,10 +380,12 @@ export async function quiverDetail(db: Database, id: string) {
     qmd_id: row.id,
     label: row.mcLabel,
     num_vertices: row.n,
-    exchange_matrix: row.exchangeMatrix,
+    exchange_matrix: decodeUpper(row.n, row.exchangeMatrix),
     dynkin_type: row.mcDynkinType,
     is_open: row.mcIsOpen ?? false,
-    exploration: row.mcExploration,
+    exploration: row.mcId ? row.mcExploration : null,
+    explored: row.mcId !== null,
+    mutation_finite: row.mutationFinite,
     is_acyclic: row.isAcyclic,
     is_connected: row.isConnected,
     max_edge: row.maxEdge,
@@ -411,9 +405,7 @@ export async function quiverDetail(db: Database, id: string) {
 }
 
 quiversRoutes.get("/:id", async (c) => {
-  const id = c.req.param("id");
-  const db = dbForId(c.env, id);
-  const detail = db ? await quiverDetail(db, id) : null;
+  const detail = await quiverDetail(c.env, c.req.param("id"));
   if (!detail) return c.json({ detail: "Quiver not found" }, 404);
   return c.json(detail);
 });
@@ -422,8 +414,10 @@ quiversRoutes.get("/:id/labelings", async (c) => {
   const id = c.req.param("id");
   const db = dbForId(c.env, id);
   if (!db) return c.json({ detail: "Quiver not found" }, 404);
-  const exists = (await db.select({ id: q.id }).from(q).where(eq(q.id, id)))[0];
-  if (!exists) return c.json({ detail: "Quiver not found" }, 404);
+  const row = (await db.select({ id: q.id, mcId: q.mutationClassId }).from(q).where(eq(q.id, id)))[0];
+  if (!row) return c.json({ detail: "Quiver not found" }, 404);
   const { limit } = parsePaging((k) => c.req.query(k), 100);
-  return c.json({ qmd_id: id, ...(await quiverLabelings(db, id, c.req.query("cursor"), limit)) });
+  return c.json({ qmd_id: id, ...(await quiverLabelings(c.env, id, row.mcId, c.req.query("cursor"), limit)) });
 });
+
+export type { Key };

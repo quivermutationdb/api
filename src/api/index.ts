@@ -7,7 +7,7 @@
  * Added since: /stats, /classes (browse), /random/{quiver,class},
  * /export.csv, and — phase 2 — keyset cursors on every list,
  * /classes/{id}/quivers, /classes/{id}/labelings, /quivers/{id}/labelings,
- * /classes/by-slug/{slug}, /nicknames, /export.ndjson, /openapi.json.
+ * /classes/by-slug/{slug}, /nicknames, /export.ndjson, /openapi.json, /lookup.
  *
  * Read-only public dataset: CORS is open, GET responses that only change on
  * ingest are edge-cacheable for 5 minutes, exports are never cached.
@@ -17,10 +17,11 @@ import { asc } from "drizzle-orm";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { rankStats } from "../db/schema";
-import { dbFor } from "../db/shard";
+import { mainDb } from "../db/shard";
 import { classesRoutes } from "./classes";
 import { BadRequest } from "./errors";
 import { exportRoutes } from "./export";
+import { lookupRoutes } from "./lookup";
 import { nicknamesRoutes } from "./nicknames";
 import { openapiRoutes } from "./openapi";
 import { listHandler, quiversRoutes } from "./quivers";
@@ -59,14 +60,14 @@ api.route("/", exportRoutes);          // /export, /export.csv, /export.ndjson
 api.route("/random", randomRoutes);
 api.route("/nicknames", nicknamesRoutes);
 api.route("/", openapiRoutes);         // /openapi.json
+api.route("/", lookupRoutes);          // /lookup (matrix -> quiver)
 
 /**
  * Homepage counts, served from the ingest-time aggregates table — never from
  * scans — plus how each rank was generated.
  */
 api.get("/stats", async (c) => {
-  const db = dbFor(c.env, 0);
-  const rows = await db.select().from(rankStats).orderBy(asc(rankStats.n));
+  const rows = await mainDb(c.env).select().from(rankStats).orderBy(asc(rankStats.n));
   const totals = rows.reduce(
     (acc, r) => ({
       quivers: acc.quivers + r.quiverCount,
@@ -90,6 +91,7 @@ api.get("/stats", async (c) => {
       pipeline_version: r.pipelineVersion,
       generator: r.generator,
       census_size: r.censusSize,
+      shard_counts: r.shardCounts,
     })),
   });
 });

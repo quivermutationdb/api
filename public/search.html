@@ -46,6 +46,16 @@
       <button class="btn" onclick="lookupId()">Go →</button>
     </div>
 
+    <div class="lookup-block" style="margin-top:1rem">
+      <label for="matrix-input" class="section-label" style="display:block">Look up by exchange matrix</label>
+      <p class="nick-note" style="margin:0 0 .4rem">Paste a skew-symmetric integer matrix, e.g. <code>[[0,1,0],[-1,0,1],[0,-1,0]]</code>. Any labeling works — it is canonicalised before lookup.</p>
+      <div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:flex-start">
+        <textarea id="matrix-input" rows="2" style="flex:1;min-width:16rem;font-family:var(--mono);font-size:.85rem" placeholder="[[0,1],[-1,0]]"></textarea>
+        <button type="button" class="btn" onclick="lookupMatrix()">Find quiver</button>
+      </div>
+      <p id="matrix-result" class="nick-note" aria-live="polite"></p>
+    </div>
+
     <div class="form-title">Filter quivers</div>
     <div class="filter-grid">
       <div class="field">
@@ -125,6 +135,33 @@ const DASH = '<span style="color:var(--ink-light)">—</span>';
 const yncell = v => v === true ? 'Yes' : v === false ? 'No' : DASH;
 const esc = s => String(s).replace(/[&<>"']/g,
   ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
+function classBadge(q) {
+  if (!q.mc_id) {
+    if (q.mutation_finite === false) return '<span class="badge badge-open" title="Proved mutation-infinite; class not explored">Infinite</span>';
+    if (q.mutation_finite === true) return '<span class="badge badge-closed">Finite</span>';
+    return '<span class="badge badge-truncated" title="Mutation class not explored">Unexplored</span>';
+  }
+  if (q.exploration === 'truncated') return '<span class="badge badge-truncated">Truncated</span>';
+  return `<span class="badge ${q.is_open ? 'badge-open' : 'badge-closed'}">${q.is_open ? 'Open' : 'Finite'}</span>`;
+}
+
+// Paste-a-matrix lookup: canonicalise server-side, go to the quiver page.
+async function lookupMatrix() {
+  const raw = document.getElementById('matrix-input').value.trim();
+  const out = document.getElementById('matrix-result');
+  if (!raw) return;
+  out.textContent = 'Looking up…';
+  try {
+    const res = await fetch(`${API}/lookup?matrix=${encodeURIComponent(raw)}`);
+    const data = await res.json();
+    if (!res.ok) { out.textContent = data.detail || 'Invalid matrix.'; return; }
+    if (data.found) { location.href = `/quiver.html?id=${encodeURIComponent(data.qmd_id)}`; return; }
+    out.innerHTML = `Not in the census (canonical id <code>${esc(data.qmd_id)}</code>, rank ${data.num_vertices}, max |b<sub>ij</sub>| ${data.max_edge}${data.is_connected ? '' : ', disconnected'}). `
+      + 'Canonical form: <code>' + esc(JSON.stringify(data.canonical_matrix)) + '</code>';
+  } catch (e) {
+    out.textContent = 'The database is temporarily unavailable.';
+  }
+}
 
 function lookupId() {
   const val = document.getElementById('id-input').value.trim();
@@ -279,9 +316,9 @@ function renderResults(data, filters) {
       <td class="mono">${yncell(q.is_acyclic)}</td>
       <td class="mono">${yncell(q.is_connected)}</td>
       <td class="mono">${yncell(q.is_bipartite)}</td>
-      <td>${q.exploration === 'truncated' ? '<span class="badge badge-truncated">Truncated</span>' : `<span class="badge ${q.is_open ? 'badge-open' : 'badge-closed'}">${q.is_open ? 'Open' : 'Finite'}</span>`}</td>
-      <td class="mono">${q.class_size ?? '∞'}</td>
-      <td><a href="/class.html?id=${encodeURIComponent(q.mc_id)}">${q.mc_id}</a>${q.nickname ? `<span class="nick">${esc(q.nickname)}</span>` : ''}</td>
+      <td>${classBadge(q)}</td>
+      <td class="mono">${q.class_size ?? ((q.mutation_finite === false || q.is_open) ? '∞' : '—')}</td>
+      <td>${q.mc_id ? `<a href="/class.html?id=${encodeURIComponent(q.mc_id)}">${q.mc_id}</a>` : '<span style="color:var(--ink-light)">not explored</span>'}${q.nickname ? `<span class="nick">${esc(q.nickname)}</span>` : ''}</td>
     </tr>
   `).join('');
 

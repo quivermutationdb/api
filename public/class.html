@@ -236,7 +236,7 @@ function renderPage(mc) {
         ${mc.exploration === 'truncated'
           ? '<span class="badge badge-truncated" title="The search stopped at the node cap; finiteness is unknown">Truncated</span>'
           : `<span class="badge ${isOpen ? 'badge-open' : 'badge-closed'}">${isOpen ? 'Open' : 'Finite type'}</span>`}
-        <span class="stat-pill">Labeled orbit: <b>${mc.labeled_size}</b> matrices</span>
+        ${mc.labeled_size != null ? `<span class="stat-pill">Labeled orbit: <b>${mc.labeled_size}</b> matrices</span>` : '<span class="stat-pill" title="The labeled orbit is stored only for small finite classes">Labeled orbit: <b>not stored</b></span>'}
         <span class="stat-pill">Distinct quivers: <b>${mc.distinct_quiver_count}</b></span>
         ${mc.merged_orbit_count > 1 ? `<span class="stat-pill">Merged from <b>${mc.merged_orbit_count}</b> BFS orbits</span>` : ''}
       </div>
@@ -252,7 +252,7 @@ function renderPage(mc) {
           <div class="meta-row"><span class="key"><a class="def-link" href="/wiki.html#rank">Rank</a></span><span class="val">${n}</span></div>
           <div class="meta-row"><span class="key"><a class="def-link" href="/wiki.html#dynkin-type">Dynkin type</a></span><span class="val">${mc.dynkin_type ?? '—'}</span></div>
           <div class="meta-row"><span class="key"><a class="def-link" href="/wiki.html#mutation-finite">Mutation type</a></span><span class="val">${mutationType(mc)}</span></div>
-          <div class="meta-row"><span class="key"><a class="def-link" href="/wiki.html#mutation-class-size">Labeled orbit size</a></span><span class="val">${mc.size_of_explored_mutation_class ?? mc.labeled_size}</span></div>
+          <div class="meta-row"><span class="key"><a class="def-link" href="/wiki.html#mutation-class-size">Labeled orbit size</a></span><span class="val">${mc.labeled_size ?? (mc.is_open ? '∞ (not stored)' : 'not stored')}</span></div>
           <div class="meta-row"><span class="key"><a class="def-link" href="/wiki.html#labeled-vs-distinct">Distinct unlabeled quivers</a></span><span class="val">${mc.distinct_quiver_count}</span></div>
           ${isOpen ? `<div class="meta-row"><span class="key"><a class="def-link" href="/wiki.html#explored-frontier">Explored frontier</a></span><span class="val">${mc.size_of_explored_frontier ?? '—'}</span></div>` : ''}
           <div class="meta-row"><span class="key"><a class="def-link" href="/wiki.html#mutation-acyclic">Mutation-acyclic</a></span><span class="val">${yn(mc.is_mutation_acyclic)}</span></div>
@@ -279,7 +279,7 @@ function renderPage(mc) {
     <div class="orbit-section">
       <div class="orbit-header">
         <div class="section-label" style="margin-bottom:0;border:none;padding:0">
-          Members — ${mc.distinct_quiver_count} distinct quivers · ${mc.labeled_size} labeled matrices${mc.exploration !== 'complete' ? ' explored' : ''}
+          Members — ${mc.distinct_quiver_count} distinct quivers${mc.exploration !== 'complete' ? ' explored' : ''}${mc.labeled_size != null ? ` · ${mc.labeled_size} labeled matrices` : ''}
         </div>
         <div style="display:flex;gap:1rem;flex-wrap:wrap">
           <div class="orbit-controls" role="group" aria-label="Member set">
@@ -320,8 +320,10 @@ function renderPage(mc) {
   members.distinct = { items: mc.distinct_quivers || [], next: mc.distinct_quivers_next_cursor || null,
                        total: mc.distinct_quiver_count, endpoint: 'quivers', loaded: true };
   const inline = !mc.labeled_quivers_truncated && Array.isArray(mc.labeled_quivers);
-  members.all = { items: inline ? mc.labeled_quivers : [], next: null, total: mc.labeled_size,
-                  endpoint: 'labelings', loaded: inline };
+  members.all = { items: inline ? mc.labeled_quivers : [], next: null, total: mc.labeled_size ?? 0,
+                  endpoint: 'labelings', loaded: inline || !mc.labelings_stored };
+  document.getElementById('btn-all').disabled = !mc.labelings_stored;
+  if (!mc.labelings_stored) document.getElementById('btn-all').title = 'Labelings are stored only for small finite classes';
   membersMode = 'distinct';
   layoutMode = 'table';
   renderMembers();

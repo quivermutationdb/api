@@ -14,7 +14,9 @@ Maintainer: Blake Jackson <jackson@icarm.io>
 
 - Quiver: `Q.n{rank}.{sha256[:16]}` — hash of the lex-min canonical exchange
   matrix (row-major lexicographically smallest relabeling). Two matrices are
-  the same quiver iff they have the same id.
+  the same quiver iff they have the same id. `GET /api/lookup?matrix=[[...]]`
+  computes it for any labeling and returns the row if present.
+- The census contains connected quivers only.
 - Mutation class: `MC.n{rank}.{sha256[:16]}` — hash of the lex-min matrix over
   the whole explored orbit. Ids are frozen; a re-keying would be announced.
 - Exchange matrix: row-major skew-symmetric integer matrix; `b_ij > 0` means
@@ -45,10 +47,15 @@ Maintainer: Blake Jackson <jackson@icarm.io>
 - Three-state properties (`is_mutation_acyclic`, `is_banff`, `is_louise`,
   `is_p_prime`, `is_finite_confirmed`, ...): `true`, `false`, or `null` =
   unknown (the search was truncated). `null` is never a "no".
-- `exploration`: `complete` (finite class, `class_size` exact), `bound` (a
-  mutation crossed the weight bound; for rank ≥ 3 this proves mutation-
-  infinite), `truncated` (node cap reached; finiteness unknown).
-  `class_size` is `null` unless `complete`; `explored_size` is always given.
+- `mutation_finite` on every quiver: `true` / `false` / `null` (unknown). It is
+  known even for quivers whose class was not explored (`explored: false`,
+  `mc_id: null`): a rank ≥ 3 quiver with an entry |b_ij| ≥ 3 is mutation-
+  infinite (Derksen–Owen).
+- `exploration` on explored classes: `complete` (finite), `bound` (a
+  mutation crossed |b_ij| ≤ 2, which proves mutation-infinite at rank ≥ 3),
+  `truncated` (node cap reached; finiteness unknown). Class members are
+  distinct quivers; `class_size` (labeled orbit) and `labelings` exist only
+  for small finite classes (`labelings_stored`).
 - `is_mutation_finite=true` returns only proved-finite classes;
   `=false` only proved-infinite ones. Undetermined classes match neither.
 - Please cite: Blake Jackson, *Quiver Mutation Database*,

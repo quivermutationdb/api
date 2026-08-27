@@ -6,42 +6,36 @@
  *   GET /export.csv    same
  *   GET /export.ndjson one JSON object per line, resumable: pass the value of
  *                      the X-Next-Cursor response header back as ?cursor=
- *                      (limit <= 5000 rows per response; omit for streaming
- *                      the whole cut in one response)
+ *                      (limit <= 5000 rows per response; omit to stream all)
  *
- * Excel is generated client-side from CSV; format=xlsx is rejected by design.
- * Each export start is logged to the downloads table (best-effort).
+ * Order: rank ascending, then shard, then id (rowid) — resumable but not a
+ * global id order across the shards of a split rank.
  */
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { Hono, type Context } from "hono";
-import {
-  classNicknames as nick,
-  downloads,
-  labelings as lab,
-  mutationClasses as mc,
-  quivers as q,
-} from "../db/schema";
-import { dbFor, type Database } from "../db/shard";
-import { afterKey, decodeCursor, encodeCursor, orderBy, type Key } from "./cursor";
-import { parseInteger } from "./errors";
+import { decodeUpper } from "../db/matrix";
+import { classNicknames as nick, downloads, labelings as lab, mutationClasses as mc, quivers as q } from "../db/schema";
+import { ALL_SHARDS, dbOf, mainDb, shardsForRank, type Database, type Shard } from "../db/shard";
+import { afterKey, decodeCursor, encodeCursor, orderBy, type Dir, type Key, type KeyCol } from "./cursor";
+import { BadRequest, parseInteger } from "./errors";
 import { filterConditions, filtersAsRecord, parseFilters, type ListFilters } from "./quivers";
 
 const PAGE = 500;
+const Q_ROWID = sql`${q}.rowid`;
 
 export const EXPORT_COLUMNS = [
-  // --- quiver (per unlabeled quiver / per labeling) ---
   "qmd_id", "num_vertices", "exchange_matrix", "representation_type",
   "max_edge", "is_acyclic", "is_connected", "is_bipartite", "is_abundant",
   "is_planar", "symmetry_order", "symmetry_name",
-  // --- mutation-class statistics ---
   "mc_id", "dynkin_type", "is_open", "class_size", "labeled_size",
   "distinct_quiver_count", "merged_orbit_count",
   "is_finite_confirmed", "is_infinite_confirmed", "is_infinite_expected",
   "size_of_explored_frontier", "is_mutation_acyclic",
   "is_banff", "is_louise", "is_p_prime",
-  // --- phase 2 (appended so old column positions are unchanged) ---
   "exploration", "nickname",
+  // --- phase 3 (appended) ---
+  "mutation_finite", "explored",
 ] as const;
 
 function cell(v: unknown): string {
@@ -56,11 +50,12 @@ function csvLine(row: Record<string, unknown>): string {
 }
 
 const EXPORT_SELECTION = {
+  rowid: sql<number>`${q}.rowid`,
   id: q.id, n: q.n, exchangeMatrix: q.exchangeMatrix,
   representationType: q.representationType, maxEdge: q.maxEdge,
   isAcyclic: q.isAcyclic, isConnected: q.isConnected,
   isBipartite: q.isBipartite, isAbundant: q.isAbundant, isPlanar: q.isPlanar,
-  symmetryGroup: q.symmetryGroup, mcId: q.mutationClassId,
+  symmetryGroup: q.symmetryGroup, mcId: q.mutationClassId, mutationFinite: q.mutationFinite,
   mcDynkinType: mc.dynkinType, mcIsOpen: mc.isOpen, mcExploration: mc.exploration,
   mcClassSize: mc.classSize,
   mcDistinct: mc.distinctQuiverCount, mcMerged: mc.mergedOrbitCount,
@@ -72,10 +67,9 @@ const EXPORT_SELECTION = {
 
 type ExportRow = Awaited<ReturnType<typeof fetchDistinctPage>>[number];
 
-/** Distinct quivers in (n, id) order after `after` (keyset). */
 function fetchDistinctPage(db: Database, filters: ListFilters, after: Key | undefined, limit: number) {
-  const cols = [q.n, q.id];
-  const dirs: ("asc" | "desc")[] = ["asc", "asc"];
+  const cols: KeyCol[] = [q.n, Q_ROWID];
+  const dirs: Dir[] = ["asc", "asc"];
   const conds = filterConditions(filters);
   if (after) conds.push(afterKey(cols, dirs, after));
   return db.select(EXPORT_SELECTION)
@@ -84,10 +78,9 @@ function fetchDistinctPage(db: Database, filters: ListFilters, after: Key | unde
     .orderBy(...orderBy(cols, dirs)).limit(limit);
 }
 
-/** Labelings in (n, id, ord) order after `after` (keyset). */
 function fetchLabelingsPage(db: Database, filters: ListFilters, after: Key | undefined, limit: number) {
-  const cols = [q.n, q.id, lab.ord];
-  const dirs: ("asc" | "desc")[] = ["asc", "asc", "asc"];
+  const cols: KeyCol[] = [q.n, Q_ROWID, lab.ord];
+  const dirs: Dir[] = ["asc", "asc", "asc"];
   const conds = filterConditions(filters);
   if (after) conds.push(afterKey(cols, dirs, after));
   return db.select({ ...EXPORT_SELECTION, ord: lab.ord, labMatrix: lab.matrix })
@@ -96,12 +89,12 @@ function fetchLabelingsPage(db: Database, filters: ListFilters, after: Key | und
     .where(and(...conds)).orderBy(...orderBy(cols, dirs)).limit(limit);
 }
 
-/** Flat export dict for one quiver + its class statistics (legacy _export_row). */
-export function exportRow(r: ExportRow, matrix?: unknown): Record<string, unknown> {
+/** Flat export dict for one quiver + its class statistics (legacy _export_row + phase 2/3 fields). */
+export function exportRow(r: ExportRow, matrix?: string): Record<string, unknown> {
   return {
     qmd_id: r.id,
     num_vertices: r.n,
-    exchange_matrix: JSON.stringify(matrix ?? r.exchangeMatrix),
+    exchange_matrix: JSON.stringify(decodeUpper(r.n, matrix ?? r.exchangeMatrix)),
     representation_type: r.representationType,
     max_edge: r.maxEdge,
     is_acyclic: r.isAcyclic,
@@ -126,45 +119,53 @@ export function exportRow(r: ExportRow, matrix?: unknown): Record<string, unknow
     is_banff: r.mcBanff,
     is_louise: r.mcLouise,
     is_p_prime: r.mcPPrime,
-    exploration: r.mcExploration,
+    exploration: r.mcId ? r.mcExploration : null,
     nickname: r.nickname,
+    mutation_finite: r.mutationFinite,
+    explored: r.mcId !== null,
   };
 }
 
 /**
- * Iterate the rows of a cut in export order, keyset-paged. Yields
- * [row, keyAfterThisRow] so callers can emit a resumable cursor.
+ * Walk a cut in export order across shards. The resume key is
+ * [shardIndex, n, rowid(, ord)]: shard index into the ordered shard list for
+ * the cut, then the per-shard keyset key.
  */
-async function* iterateRows(db: Database, filters: ListFilters, scope: string,
+async function* iterateRows(env: Env, filters: ListFilters, scope: string,
                             start: Key | undefined, max: number | null) {
-  let after = start;
+  const shards: Shard[] = filters.rank !== undefined ? shardsForRank(filters.rank) : ALL_SHARDS;
+  let si = start ? (start[0] as number) : 0;
+  let after: Key | undefined = start ? start.slice(1) : undefined;
   let emitted = 0;
-  for (;;) {
-    const want = max === null ? PAGE : Math.min(PAGE, max - emitted);
-    if (want <= 0) return;
-    if (scope === "labelings") {
-      const page = await fetchLabelingsPage(db, filters, after, want);
-      for (const r of page) {
-        after = [r.n, r.id, r.ord];
-        emitted += 1;
-        yield [exportRow(r, r.labMatrix), after] as const;
+  for (; si < shards.length; si++, after = undefined) {
+    const db = dbOf(env, shards[si]!);
+    for (;;) {
+      const want = max === null ? PAGE : Math.min(PAGE, max - emitted);
+      if (want <= 0) return;
+      if (scope === "labelings") {
+        const page = await fetchLabelingsPage(db, filters, after, want);
+        for (const r of page) {
+          after = [r.n, r.rowid, r.ord];
+          emitted += 1;
+          yield [exportRow(r, r.labMatrix), [si, ...after] as Key] as const;
+        }
+        if (page.length < want) break;
+      } else {
+        const page = await fetchDistinctPage(db, filters, after, want);
+        for (const r of page) {
+          after = [r.n, r.rowid];
+          emitted += 1;
+          yield [exportRow(r), [si, ...after] as Key] as const;
+        }
+        if (page.length < want) break;
       }
-      if (page.length < want) return;
-    } else {
-      const page = await fetchDistinctPage(db, filters, after, want);
-      for (const r of page) {
-        after = [r.n, r.id];
-        emitted += 1;
-        yield [exportRow(r), after] as const;
-      }
-      if (page.length < want) return;
     }
   }
 }
 
 export const exportRoutes = new Hono<{ Bindings: Env }>();
 
-function logDownload(c: Context<{ Bindings: Env }>, db: Database, fmt: string,
+function logDownload(c: Context<{ Bindings: Env }>, fmt: string,
                      loggedFilters: Record<string, unknown>, rowCount: () => number) {
   const email = c.req.query("email") || null;
   const name = c.req.query("name") || null;
@@ -172,7 +173,7 @@ function logDownload(c: Context<{ Bindings: Env }>, db: Database, fmt: string,
     ?? c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ?? null;
   return async () => {
     try {
-      await db.insert(downloads).values({
+      await mainDb(c.env).insert(downloads).values({
         createdAt: new Date().toISOString().replace("T", " ").slice(0, 19),
         fmt, rowCount: rowCount(), filters: loggedFilters,
         email: email?.slice(0, 254) ?? null, name: name?.slice(0, 254) ?? null,
@@ -194,96 +195,19 @@ function stamp(): string {
   return iso.slice(0, 10).replaceAll("-", "") + "-" + iso.slice(11, 19).replaceAll(":", "");
 }
 
-async function handleCsv(c: Context<{ Bindings: Env }>) {
-  const fmt = (c.req.query("format") ?? "csv").toLowerCase();
-  if (fmt !== "csv") {
-    return c.json({ detail: "format must be 'csv' (Excel files are generated client-side from CSV)" }, 400);
-  }
-  const scope = scopeOf(c);
-  if (!scope) return c.json({ detail: "scope must be 'distinct' or 'labelings'" }, 400);
-  const filters = parseFilters((k) => c.req.query(k));
-  const db = dbFor(c.env, filters.rank ?? 0);
-  const loggedFilters = { scope, ...filtersAsRecord(filters) };
-
-  const { readable, writable } = new TransformStream<Uint8Array>();
-  const encoder = new TextEncoder();
-  let rowCount = 0;
-  const finishLog = logDownload(c, db, "csv", loggedFilters, () => rowCount);
-
-  const pump = async () => {
-    const writer = writable.getWriter();
-    try {
-      // UTF-8 BOM so Excel opens unicode cleanly on double-click.
-      await writer.write(encoder.encode("\uFEFF" + EXPORT_COLUMNS.join(",") + "\r\n"));
-      let chunk = "";
-      for await (const [row] of iterateRows(db, filters, scope, undefined, null)) {
-        chunk += csvLine(row);
-        rowCount += 1;
-        if (chunk.length > 64_000) { await writer.write(encoder.encode(chunk)); chunk = ""; }
-      }
-      if (chunk) await writer.write(encoder.encode(chunk));
-      await writer.close();
-    } catch (err) {
-      await writer.abort(err);
-      throw err;
-    } finally {
-      await finishLog();
-    }
-  };
-  c.executionCtx.waitUntil(pump());
-
-  const base = scope === "labelings" ? "qmd-labelings" : "qmd-quivers";
-  return new Response(readable, {
-    headers: {
-      "Content-Type": "text/csv; charset=utf-8",
-      "Content-Disposition": `attachment; filename="${base}-${stamp()}.csv"`,
-      "Cache-Control": "no-store",
-    },
-  });
-}
-
-async function handleNdjson(c: Context<{ Bindings: Env }>) {
-  const scope = scopeOf(c);
-  if (!scope) return c.json({ detail: "scope must be 'distinct' or 'labelings'" }, 400);
-  const filters = parseFilters((k) => c.req.query(k));
-  const db = dbFor(c.env, filters.rank ?? 0);
-  const limitParam = parseInteger("limit", c.req.query("limit"));
-  const max = limitParam === undefined ? null : Math.min(Math.max(limitParam, 1), 5000);
-  const start = decodeCursor(c.req.query("cursor"), scope === "labelings" ? 3 : 2);
-
-  // Bounded page: buffer (<= 5000 rows) so the resume cursor can be a header.
-  if (max !== null) {
-    let lastKey: Key | undefined;
-    let count = 0;
-    let body = "";
-    for await (const [row, key] of iterateRows(db, filters, scope, start, max)) {
-      body += JSON.stringify(row) + "\n";
-      lastKey = key;
-      count += 1;
-    }
-    const next = count === max && lastKey ? encodeCursor(lastKey) : "";
-    if (!start) c.executionCtx.waitUntil(logDownload(c, db, "ndjson", { scope, ...filtersAsRecord(filters) }, () => count)());
-    return new Response(body, {
-      headers: {
-        "Content-Type": "application/x-ndjson; charset=utf-8",
-        "X-Next-Cursor": next,
-        "X-Row-Count": String(count),
-        "Cache-Control": "no-store",
-      },
-    });
-  }
-
-  // Unbounded: stream the whole cut.
+function streamed(c: Context<{ Bindings: Env }>, filters: ListFilters, scope: string, start: Key | undefined,
+                  fmt: "csv" | "ndjson", line: (row: Record<string, unknown>) => string, header: string) {
   const { readable, writable } = new TransformStream<Uint8Array>();
   const encoder = new TextEncoder();
   let count = 0;
-  const finishLog = logDownload(c, db, "ndjson", { scope, ...filtersAsRecord(filters) }, () => count);
+  const finishLog = logDownload(c, fmt, { scope, ...filtersAsRecord(filters) }, () => count);
   const pump = async () => {
     const writer = writable.getWriter();
     try {
+      if (header) await writer.write(encoder.encode(header));
       let chunk = "";
-      for await (const [row] of iterateRows(db, filters, scope, start, null)) {
-        chunk += JSON.stringify(row) + "\n";
+      for await (const [row] of iterateRows(c.env, filters, scope, start, null)) {
+        chunk += line(row);
         count += 1;
         if (chunk.length > 64_000) { await writer.write(encoder.encode(chunk)); chunk = ""; }
       }
@@ -297,7 +221,60 @@ async function handleNdjson(c: Context<{ Bindings: Env }>) {
     }
   };
   c.executionCtx.waitUntil(pump());
-  return new Response(readable, {
+  return readable;
+}
+
+async function handleCsv(c: Context<{ Bindings: Env }>) {
+  const fmt = (c.req.query("format") ?? "csv").toLowerCase();
+  if (fmt !== "csv") {
+    return c.json({ detail: "format must be 'csv' (Excel files are generated client-side from CSV)" }, 400);
+  }
+  const scope = scopeOf(c);
+  if (!scope) return c.json({ detail: "scope must be 'distinct' or 'labelings'" }, 400);
+  const filters = parseFilters((k) => c.req.query(k));
+  const body = streamed(c, filters, scope, undefined, "csv", csvLine, "\uFEFF" + EXPORT_COLUMNS.join(",") + "\r\n");
+  const base = scope === "labelings" ? "qmd-labelings" : "qmd-quivers";
+  return new Response(body, {
+    headers: {
+      "Content-Type": "text/csv; charset=utf-8",
+      "Content-Disposition": `attachment; filename="${base}-${stamp()}.csv"`,
+      "Cache-Control": "no-store",
+    },
+  });
+}
+
+async function handleNdjson(c: Context<{ Bindings: Env }>) {
+  const scope = scopeOf(c);
+  if (!scope) return c.json({ detail: "scope must be 'distinct' or 'labelings'" }, 400);
+  const filters = parseFilters((k) => c.req.query(k));
+  const limitParam = parseInteger("limit", c.req.query("limit"));
+  const max = limitParam === undefined ? null : Math.min(Math.max(limitParam, 1), 5000);
+  const arity = scope === "labelings" ? 4 : 3;
+  const start = decodeCursor(c.req.query("cursor"), arity);
+  if (start && typeof start[0] !== "number") throw new BadRequest("invalid cursor");
+
+  if (max !== null) {
+    let lastKey: Key | undefined;
+    let count = 0;
+    let body = "";
+    for await (const [row, key] of iterateRows(c.env, filters, scope, start, max)) {
+      body += JSON.stringify(row) + "\n";
+      lastKey = key;
+      count += 1;
+    }
+    const next = count === max && lastKey ? encodeCursor(lastKey) : "";
+    if (!start) c.executionCtx.waitUntil(logDownload(c, "ndjson", { scope, ...filtersAsRecord(filters) }, () => count)());
+    return new Response(body, {
+      headers: {
+        "Content-Type": "application/x-ndjson; charset=utf-8",
+        "X-Next-Cursor": next,
+        "X-Row-Count": String(count),
+        "Cache-Control": "no-store",
+      },
+    });
+  }
+  const body = streamed(c, filters, scope, start, "ndjson", (row) => JSON.stringify(row) + "\n", "");
+  return new Response(body, {
     headers: {
       "Content-Type": "application/x-ndjson; charset=utf-8",
       "Content-Disposition": `attachment; filename="qmd-${scope}-${stamp()}.ndjson"`,

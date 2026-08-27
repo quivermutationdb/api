@@ -51,13 +51,19 @@ def _has_known_non_ma_subquiver(matrices, mut_by_qid: dict) -> bool:
     forces a not-mutation-acyclic (n-1)-subquiver, so deleting a single vertex
     is enough to find a witness.
     """
+    from qmd.dynkin import _connected_components
     for m in matrices:
         n = len(m)
         if n < 4:          # the smallest non-mutation-acyclic quiver is rank 3 (Markov)
             continue
         for k in range(n):
-            if mut_by_qid.get(quiver_id(_delete_vertex(m, k))) is False:
-                return True
+            sub = _delete_vertex(m, k)
+            # The census stores connected quivers only, so a disconnected
+            # subquiver is looked up component by component: it is not
+            # mutation-acyclic iff some component is not.
+            for comp in _connected_components(sub):
+                if len(comp) >= 3 and mut_by_qid.get(quiver_id(comp)) is False:
+                    return True
     return False
 
 

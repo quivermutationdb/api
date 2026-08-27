@@ -419,7 +419,15 @@ def has_known_non_ma_subquiver(members, known_false):
 
       <section class="wiki-section" id="exploration">
         <h2>Exploration state</h2>
-        <p>Every mutation class records how far its breadth-first exploration got
+        <p>Classes are explored over <em>unlabeled</em> quivers: each mutation result is
+        canonicalised, so a class's members are its distinct quivers and E<sub>8</sub>'s class
+        (1,574 quivers) is explored in seconds even though its labeled orbit has tens of millions of
+        matrices. The full labeled orbit (and the "All labelings" view) is computed only for finite
+        classes with at most about 200,000 labeled matrices. Every quiver also carries a
+        finiteness label of its own (<code>mutation_finite</code>): a quiver with an entry
+        |b<sub>ij</sub>| ≥ 3 on at least three vertices is mutation-infinite (Derksen–Owen) and
+        is stored without exploring its class. The census contains connected quivers only.</p>
+        <p>Every explored mutation class records how far its breadth-first exploration got
         (<code>exploration</code> in the API):</p>
         <ul>
           <li><b>complete</b> — the bounded class was drained. The class is mutation-finite and its
@@ -461,6 +469,9 @@ def has_known_non_ma_subquiver(members, known_false):
           are keyset-based, so a pull is consistent and resumable even while data is being re-imported.</li>
           <li>Class members are paged: <code>/api/classes/{id}/quivers</code> (distinct quivers,
           canonical first) and <code>/api/classes/{id}/labelings</code> (every labeled matrix).</li>
+          <li>Have a matrix, not an id? <code>/api/lookup?matrix=[[0,1],[-1,0]]</code> canonicalises
+          it and returns the quiver (or its canonical id if it is not in the census); the Search
+          page has the same box.</li>
           <li>Bulk pulls: <code>/api/export.ndjson?…&amp;limit=5000</code> then follow the
           <code>X-Next-Cursor</code> header until it is empty; or omit <code>limit</code> to stream a
           whole cut. <code>/api/export</code> is the same cut as CSV.</li>

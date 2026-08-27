@@ -27,6 +27,7 @@ def _snapshot(r4):
         "classes": sorted(r4.classes),
         "membership": dict(sorted(r4.membership.items())),
         "class_sizes": {mc_id: mc.labeled_size for mc_id, mc in sorted(r4.classes.items())},
+        "distinct_counts": {mc_id: mc.distinct_quiver_count for mc_id, mc in sorted(r4.classes.items())},
     }
 
 

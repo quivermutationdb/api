@@ -1,33 +1,31 @@
 /**
- * /classes routes: browse list, detail, paged members, nickname lookup.
- *
- * The detail shape mirrors the legacy ClassDetail (the frontend's contract)
- * with these phase-2 changes (docs/PHASE2.md §4): the orbit is no longer
- * embedded — `distinct_quivers` is the first page (canonical quiver first)
- * with `distinct_quivers_next_cursor`, and `labeled_quivers` is present only
- * for small classes (<= LABELED_INLINE_MAX rows), otherwise
- * `labeled_quivers_truncated: true`. Use /classes/{id}/quivers and
- * /classes/{id}/labelings to page through the rest.
+ * /classes routes (schema v3, sharded): browse list, detail, paged members,
+ * nickname lookup. A class row and its labelings live in the shard of the
+ * class id; its member quivers may live in any shard of the rank, so member
+ * listings query every shard of the rank and merge.
  */
 
-import { and, desc, eq, gt, ne, sql, type SQL } from "drizzle-orm";
+import { and, eq, gt, ne, sql, type SQL } from "drizzle-orm";
 import { Hono, type Context } from "hono";
+import { decodeUpper } from "../db/matrix";
 import {
   classNicknames as nick,
   labelings as lab,
   mutationClasses as mc,
   quivers as q,
   rankStats,
-  type Matrix,
 } from "../db/schema";
-import { dbFor, dbForId, type Database } from "../db/shard";
-import { afterKey, decodeCursor, encodeCursor, orderBy } from "./cursor";
+import { dbForId, dbOf, mainDb, rankFromId, shardsForRank, type Database } from "../db/shard";
+import { afterKey, decodeCursor, encodeCursor, orderBy, type Dir, type Key, type KeyCol } from "./cursor";
 import { BadRequest, parseBool, parseDir, parseInteger, parsePaging } from "./errors";
+import { mergeShards } from "./merge";
 
 export const classesRoutes = new Hono<{ Bindings: Env }>();
 
 export const LABELED_INLINE_MAX = 200;
 const MEMBERS_PAGE = 100;
+const MC_ROWID = sql`${mc}.rowid`;
+const Q_ROWID = sql`${q}.rowid`;
 
 // ---------------------------------------------------------------------------
 // Browse list
@@ -44,6 +42,7 @@ const CLASS_SORT = {
 type ClassSortKey = keyof typeof CLASS_SORT;
 
 const CLASS_SELECTION = {
+  rowid: sql<number>`${mc}.rowid`,
   id: mc.id, n: mc.n, label: mc.label, dynkinType: mc.dynkinType,
   isOpen: mc.isOpen, exploration: mc.exploration, classSize: mc.classSize,
   distinctQuiverCount: mc.distinctQuiverCount, mergedOrbitCount: mc.mergedOrbitCount,
@@ -106,7 +105,7 @@ export function classListParamsFrom(get: (k: string) => string | undefined): Cla
   };
 }
 
-export async function listClasses(db: Database, p: ClassListParams) {
+export async function listClasses(env: Env, p: ClassListParams) {
   const conds: SQL[] = [];
   if (p.rank !== undefined) conds.push(eq(mc.n, p.rank));
   if (p.dynkinType) conds.push(eq(mc.dynkinType, p.dynkinType));
@@ -124,84 +123,87 @@ export async function listClasses(db: Database, p: ClassListParams) {
     throw new BadRequest(`sort must be one of ${Object.keys(CLASS_SORT).join(", ")}`);
   }
   const dir = parseDir(p.dir);
-  const cols = sortKey === "num_vertices" ? [mc.n, mc.id]
-    : sortKey === "mc_id" ? [mc.id] : [CLASS_SORT[sortKey], mc.n, mc.id];
-  const dirs: ("asc" | "desc")[] = cols.map((_, i) => (i === 0 ? dir : "asc"));
-  const after = decodeCursor(p.cursor, cols.length);
+  const cols: KeyCol[] = sortKey === "num_vertices" ? [mc.n, MC_ROWID]
+    : sortKey === "mc_id" ? [mc.id] : [CLASS_SORT[sortKey], mc.n, MC_ROWID];
+  const dirs: Dir[] = cols.map((_, i) => (i === 0 ? dir : "asc"));
+  const where = conds.length ? and(...conds) : undefined;
+  const shards = shardsForRank(p.rank);
 
   const onlyRank = conds.length === (p.rank !== undefined ? 1 : 0);
   const total = onlyRank
-    ? (await db.select().from(rankStats)
+    ? (await mainDb(env).select().from(rankStats)
         .where(p.rank !== undefined ? eq(rankStats.n, p.rank) : undefined))
         .reduce((a, r) => a + r.classCount, 0)
-    : ((await db.select({ n: sql<number>`count(*)` }).from(mc)
-        .leftJoin(nick, eq(nick.mcId, mc.id))
-        .where(conds.length ? and(...conds) : undefined))[0]?.n ?? 0);
+    : (await Promise.all(shards.map((s) => dbOf(env, s).select({ n: sql<number>`count(*)` }).from(mc)
+        .leftJoin(nick, eq(nick.mcId, mc.id)).where(where))))
+        .reduce((a, r) => a + (r[0]?.n ?? 0), 0);
 
-  const rows = await selectClasses(db)
-    .where(and(...conds, after ? afterKey(cols, dirs, after) : undefined))
-    .orderBy(...orderBy(cols, dirs))
-    .offset(after ? 0 : p.offset).limit(p.limit + 1);
-  const page = rows.slice(0, p.limit);
-  const last = page[page.length - 1];
-  const keyOf = (r: ClassRow) => cols.map((c) => c === mc.id ? r.id : c === mc.n ? r.n
+  const keyOf = (r: ClassRow): Key => cols.map((c) => c === mc.id ? r.id : c === mc.n ? r.n
     : c === mc.classSize ? r.classSize : c === mc.distinctQuiverCount ? r.distinctQuiverCount
-    : c === mc.dynkinType ? r.dynkinType : Number(r.isOpen));
-  return {
-    items: page.map(classListItem),
-    total,
-    next_cursor: rows.length > p.limit && last ? encodeCursor(keyOf(last)) : null,
-  };
+    : c === mc.dynkinType ? r.dynkinType : c === mc.isOpen ? Number(r.isOpen) : r.rowid);
+  const r = await mergeShards<ClassRow>({
+    shardKeys: shards.map((s) => s.key), dirs, keyOf,
+    fetch: (sk, after, limit) => selectClasses(dbOf(env, shards.find((s) => s.key === sk)!))
+      .where(and(where, after ? afterKey(cols, dirs, after) : undefined))
+      .orderBy(...orderBy(cols, dirs)).limit(limit),
+    limit: p.limit, offset: p.offset, cursor: p.cursor,
+  });
+  return { items: r.items.map(classListItem), total, next_cursor: r.next_cursor };
 }
 
 classesRoutes.get("/", async (c) => {
-  const p = classListParamsFrom((k) => c.req.query(k));
-  return c.json(await listClasses(dbFor(c.env, p.rank ?? 0), p));
+  return c.json(await listClasses(c.env, classListParamsFrom((k) => c.req.query(k))));
 });
 
 // ---------------------------------------------------------------------------
-// Members (paged): distinct quivers, labelings
+// Members (paged): distinct quivers (all shards of the rank), labelings (class shard)
 // ---------------------------------------------------------------------------
 
 /**
- * Distinct quivers of a class, most-labeled first then id. Page 1 pins the
- * canonical quiver at the top; later pages exclude it. Keyset key:
- * [labeling_count, id].
+ * Distinct quivers of a class, most-labeled first then rowid. Page 1 pins the
+ * canonical quiver at the top; later pages exclude it. Key: [labeling_count, rowid].
  */
-export async function classQuivers(db: Database, mcId: string, canonicalQid: string | null,
+export async function classQuivers(env: Env, mcId: string, canonicalQid: string | null,
                                    cursor: string | undefined, limit: number) {
-  const cols = [q.labelingCount, q.id];
-  const dirs: ("asc" | "desc")[] = ["desc", "asc"];
-  const after = decodeCursor(cursor, 2);
-  const conds = [eq(q.mutationClassId, mcId)];
-  if (canonicalQid) conds.push(ne(q.id, canonicalQid));
-  if (after) conds.push(afterKey(cols, dirs, after));
-
-  const items: { qmd_id: string; matrix: Matrix; labeling_count: number; is_canonical: boolean }[] = [];
+  const n = rankFromId(mcId) ?? 0;
+  const shards = shardsForRank(n);
+  const cols: KeyCol[] = [q.labelingCount, Q_ROWID];
+  const dirs: Dir[] = ["desc", "asc"];
+  type Row = { rowid: number; id: string; m: string; lc: number | null };
+  const items: { qmd_id: string; matrix: number[][]; labeling_count: number; is_canonical: boolean }[] = [];
   let take = limit;
-  if (!after && canonicalQid) {
-    const canon = (await db.select({ id: q.id, m: q.exchangeMatrix, lc: q.labelingCount })
-      .from(q).where(eq(q.id, canonicalQid)))[0];
+  if (!cursor && canonicalQid) {
+    const cdb = dbForId(env, canonicalQid);
+    const canon = cdb ? (await cdb.select({ id: q.id, m: q.exchangeMatrix, lc: q.labelingCount })
+      .from(q).where(eq(q.id, canonicalQid)))[0] : undefined;
     if (canon) {
-      items.push({ qmd_id: canon.id, matrix: canon.m, labeling_count: canon.lc ?? 1, is_canonical: true });
+      items.push({ qmd_id: canon.id, matrix: decodeUpper(n, canon.m), labeling_count: canon.lc ?? 1, is_canonical: true });
       take -= 1;
     }
   }
-  const rows = await db.select({ id: q.id, m: q.exchangeMatrix, lc: q.labelingCount })
-    .from(q).where(and(...conds)).orderBy(desc(q.labelingCount), q.id).limit(take + 1);
-  for (const r of rows.slice(0, take)) {
-    items.push({ qmd_id: r.id, matrix: r.m, labeling_count: r.lc ?? 1, is_canonical: false });
+  const r = await mergeShards<Row>({
+    shardKeys: shards.map((s) => s.key), dirs,
+    keyOf: (row) => [row.lc, row.rowid],
+    fetch: (sk, after, lim) => dbOf(env, shards.find((s) => s.key === sk)!)
+      .select({ rowid: sql<number>`${q}.rowid`, id: q.id, m: q.exchangeMatrix, lc: q.labelingCount })
+      .from(q).where(and(eq(q.mutationClassId, mcId),
+                         canonicalQid ? ne(q.id, canonicalQid) : undefined,
+                         after ? afterKey(cols, dirs, after) : undefined))
+      .orderBy(...orderBy(cols, dirs)).limit(lim),
+    limit: take, cursor,
+  });
+  for (const row of r.items) {
+    items.push({ qmd_id: row.id, matrix: decodeUpper(n, row.m), labeling_count: row.lc ?? 1, is_canonical: false });
   }
-  const last = rows[Math.min(take, rows.length) - 1];
-  return {
-    items,
-    next_cursor: rows.length > take && last ? encodeCursor([last.lc ?? 1, last.id]) : null,
-  };
+  return { items, next_cursor: r.next_cursor };
 }
 
 /** Labeled matrices of a class in orbit order (optionally one quiver's). Key: [ord]. */
-export async function classLabelings(db: Database, mcId: string, qmdId: string | undefined,
+export async function classLabelings(env: Env, mcId: string, qmdId: string | undefined,
                                      cursor: string | undefined, limit: number) {
+  const db = dbForId(env, mcId);
+  if (!db) return { items: [], next_cursor: null };
+  const n = rankFromId(mcId) ?? 0;
   const after = decodeCursor(cursor, 1);
   const rows = await db.select({ ord: lab.ord, qmdId: lab.qmdId, matrix: lab.matrix })
     .from(lab)
@@ -212,7 +214,7 @@ export async function classLabelings(db: Database, mcId: string, qmdId: string |
   const page = rows.slice(0, limit);
   const last = page[page.length - 1];
   return {
-    items: page.map((r) => ({ ord: r.ord, qmd_id: r.qmdId, matrix: r.matrix })),
+    items: page.map((r) => ({ ord: r.ord, qmd_id: r.qmdId, matrix: decodeUpper(n, r.matrix) })),
     next_cursor: rows.length > limit && last ? encodeCursor([last.ord]) : null,
   };
 }
@@ -221,16 +223,17 @@ export async function classLabelings(db: Database, mcId: string, qmdId: string |
 // Detail
 // ---------------------------------------------------------------------------
 
-export async function classDetail(db: Database, id: string) {
-  const row = (await db.select().from(mc).leftJoin(nick, eq(nick.mcId, mc.id))
-    .where(eq(mc.id, id)))[0];
+export async function classDetail(env: Env, id: string) {
+  const db = dbForId(env, id);
+  if (!db) return null;
+  const row = (await db.select().from(mc).leftJoin(nick, eq(nick.mcId, mc.id)).where(eq(mc.id, id)))[0];
   if (!row) return null;
   const m = row.mutation_classes;
   const nn = row.class_nicknames;
 
-  const distinct = await classQuivers(db, id, m.canonicalQuiverId, undefined, MEMBERS_PAGE);
-  const inline = m.classSize <= LABELED_INLINE_MAX;
-  const labeled = inline ? (await classLabelings(db, id, undefined, undefined, LABELED_INLINE_MAX)).items
+  const distinct = await classQuivers(env, id, m.canonicalQuiverId, undefined, MEMBERS_PAGE);
+  const inline = m.exploration === "complete" && m.classSize !== null && m.classSize <= LABELED_INLINE_MAX;
+  const labeled = inline ? (await classLabelings(env, id, undefined, undefined, LABELED_INLINE_MAX)).items
     .map((r) => ({ qmd_id: r.qmd_id, matrix: r.matrix })) : [];
 
   return {
@@ -246,11 +249,12 @@ export async function classDetail(db: Database, id: string) {
     labeled_size: m.classSize,
     distinct_quiver_count: m.distinctQuiverCount,
     merged_orbit_count: m.mergedOrbitCount,
-    canonical_matrix: m.canonicalMatrix,
+    canonical_matrix: decodeUpper(m.n, m.canonicalMatrix),
     canonical_qid: m.canonicalQuiverId,
     distinct_quivers: distinct.items,
     distinct_quivers_next_cursor: distinct.next_cursor,
     labeled_quivers: labeled,
+    labelings_stored: m.classSize !== null,
     labeled_quivers_truncated: !inline,
     is_finite_confirmed: m.isFiniteConfirmed,
     is_infinite_confirmed: m.isInfiniteConfirmed,
@@ -266,20 +270,19 @@ export async function classDetail(db: Database, id: string) {
 }
 
 async function detailResponse(c: Context<{ Bindings: Env }>, id: string) {
-  const db = dbForId(c.env, id);
-  const d = db ? await classDetail(db, id) : null;
+  const d = await classDetail(c.env, id);
   if (!d) return c.json({ detail: "Mutation class not found" }, 404);
   return c.json(d);
 }
 
-/** Resolve a nickname slug to its class id (slugs are global, so the index DB answers). */
-export async function slugToId(db: Database, slug: string): Promise<string | null> {
-  const r = (await db.select({ id: nick.mcId }).from(nick).where(eq(nick.slug, slug.toLowerCase())))[0];
+/** Resolve a nickname slug to its class id (curated table, main database). */
+export async function slugToId(env: Env, slug: string): Promise<string | null> {
+  const r = (await mainDb(env).select({ id: nick.mcId }).from(nick).where(eq(nick.slug, slug.toLowerCase())))[0];
   return r?.id ?? null;
 }
 
 classesRoutes.get("/by-slug/:slug", async (c) => {
-  const id = await slugToId(dbFor(c.env, 0), c.req.param("slug"));
+  const id = await slugToId(c.env, c.req.param("slug"));
   if (!id) return c.json({ detail: "No class with that nickname" }, 404);
   return detailResponse(c, id);
 });
@@ -293,7 +296,7 @@ classesRoutes.get("/:id/quivers", async (c) => {
   const row = (await db.select({ canon: mc.canonicalQuiverId }).from(mc).where(eq(mc.id, id)))[0];
   if (!row) return c.json({ detail: "Mutation class not found" }, 404);
   const { limit } = parsePaging((k) => c.req.query(k), MEMBERS_PAGE);
-  return c.json({ mc_id: id, ...(await classQuivers(db, id, row.canon, c.req.query("cursor"), limit)) });
+  return c.json({ mc_id: id, ...(await classQuivers(c.env, id, row.canon, c.req.query("cursor"), limit)) });
 });
 
 classesRoutes.get("/:id/labelings", async (c) => {
@@ -304,5 +307,5 @@ classesRoutes.get("/:id/labelings", async (c) => {
   if (!row) return c.json({ detail: "Mutation class not found" }, 404);
   const { limit } = parsePaging((k) => c.req.query(k), MEMBERS_PAGE);
   return c.json({ mc_id: id,
-    ...(await classLabelings(db, id, c.req.query("qmd_id") || undefined, c.req.query("cursor"), limit)) });
+    ...(await classLabelings(c.env, id, c.req.query("qmd_id") || undefined, c.req.query("cursor"), limit)) });
 });

@@ -105,6 +105,27 @@ def lexmin_form(matrix: Matrix) -> Matrix:
     if n <= 1:
         return matrix
 
+    # Twin vertices: (u v) is an automorphism of the matrix iff b_uv = 0 and
+    # u, v have identical rows elsewhere. Swapping twins never changes the
+    # key, so at every level only one representative per twin class needs to
+    # be tried. This is what keeps sparse / symmetric quivers (isolated
+    # vertices, symmetric leaves — everything in a finite-type class) from
+    # exploding into thousands of identical branches.
+    twin = list(range(n))            # union-find root per vertex
+
+    def find(x: int) -> int:
+        while twin[x] != x:
+            twin[x] = twin[twin[x]]
+            x = twin[x]
+        return x
+
+    for u in range(n):
+        for v in range(u + 1, n):
+            if matrix[u][v] != 0:
+                continue
+            if all(matrix[u][w] == matrix[v][w] for w in range(n) if w != u and w != v):
+                twin[find(v)] = find(u)
+
     best_key: list[Optional[tuple[int, ...]]] = [_lex_key(matrix)]
     best_perm: list[tuple[int, ...]] = [tuple(range(n))]
 
@@ -124,16 +145,28 @@ def lexmin_form(matrix: Matrix) -> Matrix:
             bound.extend(sorted(row[v] for v in remaining))
         if tuple(bound) > best_key[0][: len(bound)]:
             return
-        # Children in ascending order of their entry in the first row: the
-        # completions that sort row 0 come first, so good keys are found early.
-        anchor = prefix[0]
-        for v in sorted(remaining, key=lambda v: (matrix[anchor][v], v)):
+        # One candidate per twin class among the remaining vertices, in
+        # ascending order of their entry in the first row (good keys first).
+        seen_roots: set[int] = set()
+        candidates = []
+        for v in sorted(remaining, key=lambda v: (matrix[prefix[0]][v], v)):
+            r = find(v)
+            if r in seen_roots:
+                continue
+            seen_roots.add(r)
+            candidates.append(v)
+        for v in candidates:
             rest = [u for u in remaining if u != v]
             prefix.append(v)
             dfs(prefix, rest)
             prefix.pop()
 
+    seen_roots: set[int] = set()
     for start in range(n):
+        r = find(start)
+        if r in seen_roots:
+            continue
+        seen_roots.add(r)
         dfs([start], [v for v in range(n) if v != start])
 
     return _apply_permutation(matrix, best_perm[0])

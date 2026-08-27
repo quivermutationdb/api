@@ -209,17 +209,17 @@ def test_local_acyclicity_never_false_when_truncated(markov):
 
 def test_class_is_mutation_acyclic(A3, markov):
     r_a3 = explore_mutation_class(A3)
-    assert class_is_mutation_acyclic(r_a3.labeled_quivers, r_a3.is_open) is True
+    assert class_is_mutation_acyclic(r_a3.members, r_a3.is_open) is True
     r_mk = explore_mutation_class(markov)
     assert not r_mk.is_open                       # Markov is its own closed class
-    assert class_is_mutation_acyclic(r_mk.labeled_quivers, r_mk.is_open) is False
+    assert class_is_mutation_acyclic(r_mk.members, r_mk.is_open) is False
 
 
 def test_subquiver_fallback_markov_heredity(r4, markov):
     from qmd.class_properties import resolve_mutation_acyclic
     infos = [(mc_id, len(mc.canonical_rep),
-              class_is_mutation_acyclic(mc.labeled_quivers, mc.is_open),
-              mc.labeled_quivers, mc.quiver_ids) for mc_id, mc in r4.classes.items()]
+              class_is_mutation_acyclic(mc.members, mc.is_open),
+              mc.members, mc.quiver_ids) for mc_id, mc in r4.classes.items()]
     resolved = resolve_mutation_acyclic(infos)
     base = {mc_id: b for mc_id, _n, b, _m, _q in infos}
     markov_mc = r4.membership[quiver_id(markov)]

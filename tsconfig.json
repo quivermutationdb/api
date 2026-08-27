@@ -5,6 +5,7 @@
     "module": "es2022",
     "moduleResolution": "bundler",
     "strict": true,
+    "resolveJsonModule": true,
     "noUncheckedIndexedAccess": true,
     "verbatimModuleSyntax": true,
     "skipLibCheck": true,

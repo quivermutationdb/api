@@ -91,7 +91,10 @@ function renderPage(q) {
     <div class="title-block">
       <div class="qid">${q.qmd_id}</div>
       <h1>${q.label ?? ('Rank-' + n + ' Quiver')}</h1>
-      ${q.exploration === 'truncated'
+      ${!q.mc_id
+        ? (q.mutation_finite === false ? '<span class="badge badge-open" title="Proved mutation-infinite (Derksen–Owen); class not explored">Mutation-infinite</span>'
+           : '<span class="badge badge-truncated" title="Mutation class not explored">Class not explored</span>')
+        : q.exploration === 'truncated'
         ? '<span class="badge badge-truncated" title="Class partially explored; finiteness unknown">Truncated class</span>'
         : `<span class="badge ${isOpen ? 'badge-open' : 'badge-closed'}">${isOpen ? 'Open class' : 'Finite type'}</span>`}
       ${q.nickname ? `<span class="badge badge-closed" style="margin-left:.4rem">Class: ${esc(q.nickname)}</span>` : ''}
@@ -162,8 +165,11 @@ function renderPage(q) {
   details.appendChild(renderMatrix(q.exchange_matrix));
   quiverSection.appendChild(details);
 
-  // Load class members
-  fetchClassMembers(q.mc_id, q.qmd_id);
+  // Load class members (only when the class was explored)
+  if (q.mc_id) fetchClassMembers(q.mc_id, q.qmd_id);
+  else document.getElementById('class-members-container').innerHTML =
+    '<p style="padding:1rem;color:var(--ink-light);font-style:italic">The mutation class of this quiver was not explored'
+    + (q.mutation_finite === false ? ' — it is mutation-infinite by Derksen–Owen (an entry |b<sub>ij</sub>| ≥ 3).' : '.') + '</p>';
 }
 
 // Members are paged (100 per page) through /classes/{id}/quivers; the class

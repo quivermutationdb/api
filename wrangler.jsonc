@@ -35,6 +35,21 @@
       // Drizzle writes migrations here (drizzle.config.ts `out`); wrangler
       // applies them with `d1 migrations apply`.
       "migrations_dir": "drizzle"
+    },
+    // Rank 6 is split across two databases (data/shards.json). Create with
+    // `wrangler d1 create qmd-n6-0` / `qmd-n6-1` and paste the ids here; the
+    // same migrations apply to every shard (scripts/migrate-all.sh).
+    {
+      "binding": "DB_N6_0",
+      "database_name": "qmd-n6-0",
+      "database_id": "69ab9e0e-8805-47d4-811b-8fbfd0b982a2",
+      "migrations_dir": "drizzle"
+    },
+    {
+      "binding": "DB_N6_1",
+      "database_name": "qmd-n6-1",
+      "database_id": "784c9b75-9128-4856-909a-141622dbee73",
+      "migrations_dir": "drizzle"
     }
   ],
 

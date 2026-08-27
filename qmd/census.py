@@ -115,6 +115,24 @@ def count_quivers(n: int, h: int) -> int:
     return int(total)
 
 
+def count_connected_quivers(n: int, h: int) -> int:
+    """
+    Exact number of *connected* unlabeled quivers on n vertices with all
+    |b_ij| <= h. Every quiver is a multiset of connected components, so the
+    all-quiver counts a_k and connected counts c_k satisfy the Euler
+    transform  sum a_k x^k = prod_k (1 - x^k)^(-c_k); invert it.
+    """
+    a = [count_quivers(k, h) for k in range(0, n + 1)]      # a_0 = 1
+    # Standard inversion: n*a_n = sum_{k=1..n} b_k a_{n-k}, b_k = sum_{d|k} d*c_d.
+    c = [0] * (n + 1)
+    b = [0] * (n + 1)
+    for m in range(1, n + 1):
+        total = m * a[m] - sum(b[k] * a[m - k] for k in range(1, m))
+        b[m] = total
+        c[m] = (b[m] - sum(d * c[d] for d in range(1, m) if m % d == 0)) // m
+    return c[n]
+
+
 # ---------------------------------------------------------------------------
 # Hereditary canonical form (augmentation key) with branch and bound
 # ---------------------------------------------------------------------------
@@ -235,9 +253,17 @@ def generate_cell(n: int, h: int, workers: int = 1,
     yield from level
 
 
-def census_seeds(n: int, h: int, workers: int = 1, progress=None) -> list[Matrix]:
-    """The cell (n, h) as ID-canonical (lex-min) matrices, sorted — run_generation seeds."""
-    seeds = [canonical_form(m) for m in generate_cell(n, h, workers=workers, progress=progress)]
+def census_seeds(n: int, h: int, workers: int = 1, progress=None,
+                 connected_only: bool = True) -> list[Matrix]:
+    """
+    The cell (n, h) as ID-canonical (lex-min) matrices, sorted — run_generation
+    seeds. Generation must pass through disconnected intermediates (the
+    canonical block of a connected quiver need not be connected), so the
+    connected filter is applied to the finished level only.
+    """
+    from qmd.core import is_connected
+    reps = generate_cell(n, h, workers=workers, progress=progress)
+    seeds = [canonical_form(m) for m in reps if not connected_only or is_connected(m)]
     seeds.sort()
     return seeds
 

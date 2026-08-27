@@ -38,13 +38,16 @@ await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
 await page.waitForFunction(() =>
   document.getElementById("api-status")?.textContent === "connected", null, { timeout: 15000 });
 check("home: api connected", true);
-check("home: distinct stat", await page.locator("#stat-distinct").textContent() === "724");
-check("home: labeled stat", await page.locator("#stat-labeled").textContent() === "3,754");
+const stats = await (await fetch(`${BASE}/api/stats`)).json();
+const rank3 = stats.by_rank.find((r) => r.n === 3).distinct_quivers;
+check("home: distinct stat from /stats", await page.locator("#stat-distinct").textContent() === stats.distinct_quivers.toLocaleString("en-US"));
+check("home: labeled stat from /stats", await page.locator("#stat-labeled").textContent() === stats.labeled_quivers.toLocaleString("en-US"));
 check("home: featured quiver drawn",
   await page.locator("#featured-figure svg").count() === 1);
 
 // ---- Browse ----
 await page.goto(`${BASE}/browse.html`, { waitUntil: "networkidle" });
+await page.evaluate((n) => { window.__rank3 = n; }, rank3);
 await page.waitForFunction(() =>
   document.querySelectorAll("#table-body tr").length >= 50, null, { timeout: 15000 });
 check("browse: 50 rows", true);
@@ -54,18 +57,19 @@ check("browse: api connected",
 await page.selectOption("#filter-rank", "3");
 await page.evaluate(() => applyFilters());
 await page.waitForFunction(() =>
-  document.querySelectorAll("#table-body tr").length === 25, null, { timeout: 15000 });
-check("browse: rank-3 filter shows 25 rows", true);
+  document.querySelectorAll("#table-body tr").length === window.__rank3, null, { timeout: 15000 });
+check("browse: rank-3 filter shows every rank-3 quiver", true);
 
 // ---- Search (empty until a filter is applied — set rank=3 and run) ----
 await page.goto(`${BASE}/search.html`, { waitUntil: "networkidle" });
+await page.evaluate((n) => { window.__rank3 = n; }, rank3);
 await page.selectOption("#f-rank", "3");
 await page.evaluate(() => runSearch());
 await page.waitForFunction(() =>
-  document.querySelectorAll("#results-area tbody tr").length === 25,
+  document.querySelectorAll("#results-area tbody tr").length === window.__rank3,
   null, { timeout: 15000 });
-check("search: rank-3 search returns 25 rows", true);
-check("search: count text", (await page.textContent(".results-count")).includes("25"));
+check("search: rank-3 search returns every rank-3 quiver", true);
+check("search: count text", (await page.textContent(".results-count")).includes(String(rank3)));
 
 // ---- Quiver detail ----
 await page.goto(`${BASE}/quiver.html?id=${encodeURIComponent(qid)}`, { waitUntil: "networkidle" });
@@ -177,8 +181,9 @@ await page.evaluate(() => applyFilters());
 await page.waitForFunction(() => document.querySelectorAll("#table-body .nick").length > 0, null, { timeout: 15000 });
 check("browse: Markov nickname shown next to its class id", (await page.locator("#table-body .nick").first().textContent()) === "Markov");
 await page.evaluate(() => setScope("labelings"));
-await page.waitForFunction(() => document.querySelectorAll("#table-body tr").length === 50, null, { timeout: 15000 });
-check("browse: sort headers disabled in labelings scope", (await page.locator("th.sort-disabled").count()) > 0);
+await page.waitForFunction(() => document.querySelectorAll("#table-body tr").length > 1
+  && document.querySelectorAll("th.sort-disabled").length > 0, null, { timeout: 15000 });
+check("browse: labelings scope lists stored labelings (finite classes only), sort disabled", true);
 
 // ---- Home uses /stats and /random ----
 await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
