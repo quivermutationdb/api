@@ -36,9 +36,11 @@
       // applies them with `d1 migrations apply`.
       "migrations_dir": "drizzle"
     },
-    // Rank 6 is split across two databases (data/shards.json). Create with
-    // `wrangler d1 create qmd-n6-0` / `qmd-n6-1` and paste the ids here; the
-    // same migrations apply to every shard (scripts/migrate-all.sh).
+    // Rank 6 is split across four databases (data/shards.json), one per
+    // id-hash bucket, so each shard's initial load fits a month's included D1
+    // writes. Same migrations on every shard (scripts/migrate-all.sh), then
+    // scripts/trim-shard-indexes.sh drops the indexes a single-rank shard does
+    // not need.
     {
       "binding": "DB_N6_0",
       "database_name": "qmd-n6-0",
@@ -49,6 +51,18 @@
       "binding": "DB_N6_1",
       "database_name": "qmd-n6-1",
       "database_id": "784c9b75-9128-4856-909a-141622dbee73",
+      "migrations_dir": "drizzle"
+    },
+    {
+      "binding": "DB_N6_2",
+      "database_name": "qmd-n6-2",
+      "database_id": "fa73060a-bc97-447f-a0b2-36d1ff5e8240",
+      "migrations_dir": "drizzle"
+    },
+    {
+      "binding": "DB_N6_3",
+      "database_name": "qmd-n6-3",
+      "database_id": "2068ac37-3699-43dd-b4ee-150ea91d2662",
       "migrations_dir": "drizzle"
     }
   ],

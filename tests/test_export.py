@@ -62,7 +62,9 @@ def test_shard_routing_matches_config():
     assert d1_export.shard_of("Q.n4.7abc000000000000", 4) == ("main", "qmd")
     assert d1_export.shard_of("Q.n6.0abc000000000000", 6)[0] == "n6.0"
     assert d1_export.shard_of("Q.n6.1abc000000000000", 6)[0] == "n6.1"
-    assert d1_export.shard_of("Q.n6.fabc000000000000", 6)[0] == "n6.1"   # 15 % 2
+    assert d1_export.shard_of("Q.n6.fabc000000000000", 6)[0] == "n6.3"   # 15 % 4
+    assert d1_export.shard_of("Q.n6.7abc000000000000", 6)[0] == "n6.3"   # 7 % 4
+    assert len(d1_export.shard_keys_for(6)) == 4
 
 
 def _gen(n, **kw):

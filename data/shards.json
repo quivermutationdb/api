@@ -1,12 +1,29 @@
 {
-  "$comment": "Which D1 database holds which rank. Read by the Python exporter (file naming + import-d1.sh) and mirrored by src/db/shard.ts (bindings). A rank may be split across several databases by the bucket of its id hash: bucket = parseInt(hash[0], 16) % buckets. Everything not listed lives in the main database.",
-  "main": { "binding": "DB", "database": "qmd" },
+  "$comment": "Which D1 database holds which rank. Read by the Python exporter (file naming + import-d1.sh) and mirrored by src/db/shard.ts (bindings). A rank may be split across several databases by the bucket of its id hash: bucket = parseInt(hash[0], 16) % buckets (4 buckets split the 16 hex digits evenly). Everything not listed lives in the main database. Rank 6 (42.5 M quivers) is split in four so each shard's initial load (~42 M row-writes with the trimmed index set, scripts/trim-shard-indexes.sh) fits one month's 50 M included D1 writes.",
+  "main": {
+    "binding": "DB",
+    "database": "qmd"
+  },
   "split": {
     "6": {
-      "buckets": 2,
+      "buckets": 4,
       "databases": [
-        { "binding": "DB_N6_0", "database": "qmd-n6-0" },
-        { "binding": "DB_N6_1", "database": "qmd-n6-1" }
+        {
+          "binding": "DB_N6_0",
+          "database": "qmd-n6-0"
+        },
+        {
+          "binding": "DB_N6_1",
+          "database": "qmd-n6-1"
+        },
+        {
+          "binding": "DB_N6_2",
+          "database": "qmd-n6-2"
+        },
+        {
+          "binding": "DB_N6_3",
+          "database": "qmd-n6-3"
+        }
       ]
     }
   }

@@ -9,6 +9,7 @@ set -euo pipefail
 DIR=${1:?usage: release-data.sh DIR}
 echo "== 0/4 verify export (connected-only guarantee)"; python3 scripts/verify-export.py "$DIR"
 echo "== 1/4 migrations"; npm run db:migrate:remote
+echo "== 1b/4 trim single-rank shard indexes"; scripts/trim-shard-indexes.sh --remote
 echo "== 2/4 rank data";  scripts/import-d1.sh "$DIR" --remote
 echo "== 3/4 nicknames";  python3 scripts/nicknames.py --sql "$DIR/nicknames.sql"
 npx wrangler d1 execute qmd --remote --file="$DIR/nicknames.sql"

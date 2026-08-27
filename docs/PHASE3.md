@@ -55,16 +55,20 @@ quivers only — a disconnected quiver is a disjoint union):
   now; mutation_classes ≈ 650; labelings ≈ 240.
 * **Sharding** (`data/shards.json`, `src/db/shard.ts`): one main database
   plus, for a split rank, `buckets` databases chosen by the first hex digit of
-  the id hash. Rank 6 is split in two (`qmd-n6-0`, `qmd-n6-1`, created in the
-  ICARM account). Lists query every shard that can hold matching rows and
+  the id hash. Rank 6 is split in **four** (`qmd-n6-0..3`, created in the
+  ICARM account) so each shard's initial load (~10.6 M quivers × 4 row-writes
+  ≈ 42 M) fits one month's 50 M included D1 writes; `scripts/trim-shard-indexes.sh`
+  drops the (n)-prefixed indexes a single-rank shard does not need. Lists query every shard that can hold matching rows and
   merge by sort key (`src/api/merge.ts`, composite cursors); a class row and
   its labelings live in the shard of the class id; members of a class may
   span shards, so member lists merge too. `rank_stats.shard_counts` lets
   `/random/*` pick a shard proportionally.
 * **Cost:** ≈ 3 GB browseable cells + ≈ 10 GB rank 6 → ≈ $12–15/month on the
-  Workers Paid plan. One-time row-writes for rank 6 (~130 M with 3 indexes)
-  are ~$80–120 if loaded in one month, or free if staged over three months
-  (`scripts/import-d1.sh … --shard n6.0`, then `n6.1` the next month).
+  Workers Paid plan. D1 bills one row-write per index touched (7 per quiver
+  with the full index set, 4 on a trimmed shard). Load schedule against the
+  50 M included writes per cycle: ranks 1–5 (≈ 42 M) in one cycle, ranks 7–8
+  (≈ 24 M) plus one rank-6 shard (≈ 42 M) the next (~$16), then one shard per
+  cycle at $0 (`scripts/import-d1.sh dist/d1 --remote --ranks 6 --shard n6.k`).
 
 ## 4. Pipeline
 
