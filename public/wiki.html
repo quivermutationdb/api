@@ -359,13 +359,16 @@ def has_known_non_ma_subquiver(members, known_false):
         <h2>Banff</h2>
         <p>The <b>Banff</b> condition is a sufficient combinatorial criterion for <i>local
         acyclicity</i> of the cluster algebra (Muller). It is checked by recursive
-        <b>source-deletion</b>: a quiver passes if it is acyclic, or it has a source vertex k and
-        a neighbour j such that deleting k and (separately) deleting j each leave a quiver whose
-        mutation class still satisfies the condition. The search runs over the mutation class.</p>
+        <b>source/sink-deletion</b>: a quiver passes if it is acyclic, or it has a vertex k that
+        is a source or a sink and a neighbour j (every arrow at a source or sink is a
+        <i>covering pair</i>) such that deleting k and (separately) deleting j each leave a
+        quiver whose mutation class still satisfies the condition. The search runs over the
+        mutation class and is symmetric under reversing all arrows.</p>
         <pre class="code-block"><code>def check_condition(q, kind):           # kind in {"banff", "louise", "p_prime"}
     if is_acyclic(q):
         return True                                 # base case
-    for k in sources(q):                            # a source vertex
+    extremal = sources(q) if kind == "p_prime" else sources(q) + sinks(q)
+    for k in extremal:                              # a source (or, for Banff/Louise, a sink)
         if not cond_class(delete_vertex(q, k), kind):
             continue
         if kind == "p_prime":
@@ -383,17 +386,17 @@ def has_known_non_ma_subquiver(members, known_false):
       <section class="wiki-section" id="louise">
         <h2>Louise</h2>
         <p>The <b>Louise</b> condition strengthens <a href="#banff">Banff</a>: in addition to the
-        deletions of the source k and a neighbour j, the quiver with <i>both</i> k and j removed
+        deletions of the source-or-sink k and a neighbour j, the quiver with <i>both</i> k and j removed
         must again satisfy the condition (the third branch in the code above). Louise also implies
         local acyclicity.</p>
       </section>
 
       <section class="wiki-section" id="p-prime">
         <h2>P′</h2>
-        <p>The <b>P′</b> condition is the weakest of the three source-deletion criteria: a quiver
-        passes if it is acyclic, or it has a source k whose deletion leaves a quiver still
-        satisfying P′ — no neighbour condition is required. (A distinct stronger property
-        <b>P</b> is not yet tracked.)</p>
+        <p>The <b>P′</b> condition is the weakest of the three deletion criteria: a quiver
+        passes if it is acyclic, or it has a <em>source</em> k whose deletion leaves a quiver still
+        satisfying P′ — no neighbour condition is required, and (unlike Banff/Louise) only
+        sources are used. (A distinct stronger property <b>P</b> is not yet tracked.)</p>
       </section>
 
       <section class="wiki-section" id="three-state">
@@ -401,7 +404,7 @@ def has_known_non_ma_subquiver(members, known_false):
         <p>The semidecidable properties (<a href="#banff">Banff</a>, <a href="#louise">Louise</a>,
         <a href="#p-prime">P′</a>) are reported with three states, never a guess:</p>
         <ul>
-          <li><b>Yes</b> — a witness (mutation sequence + source-deletion certificate) was found.</li>
+          <li><b>Yes</b> — a witness (mutation sequence + source/sink-deletion certificate) was found.</li>
           <li><b>No</b> — the search was provably exhaustive (the whole finite mutation class was
           covered with no depth, timeout, or arrow-weight truncation) and no witness exists.</li>
           <li><b>Unknown</b> — the search was truncated before a witness or a proof.</li>

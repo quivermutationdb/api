@@ -150,6 +150,49 @@ def test_local_acyclicity_invariant_under_relabeling(D4, kind):
     assert fn(m, **BUDGET)[0] == fn(_apply_permutation(m, (3, 1, 0, 2)), **BUDGET)[0]
 
 
+def test_extremal_vertices_lists_sources_and_sinks():
+    # 0 -> 1 -> 2 <- 3 with a 2-cycle-free core: 0 source, 3 source, 2 sink, 1 neither
+    q = to_matrix([[0, 1, 0, 0], [-1, 0, 1, 0], [0, -1, 0, -1], [0, 0, 1, 0]])
+    assert la._sources(q) == [0, 3]
+    assert la._sinks(q) == [2]
+    assert la._extremal_vertices(q) == [(0, "source"), (3, "source"), (2, "sink")]
+
+
+def _random_quivers(seed, count, ranks=(3, 4), weights=(0, 1, -1, 1, -1, 2, -2)):
+    rng = random.Random(seed)
+    out = []
+    for _ in range(count):
+        n = rng.choice(ranks)
+        m = [[0] * n for _ in range(n)]
+        for i in range(n):
+            for j in range(i + 1, n):
+                w = rng.choice(weights)
+                m[i][j], m[j][i] = w, -w
+        out.append(to_matrix(m))
+    return out
+
+
+@pytest.mark.parametrize("kind", ["banff", "louise"])
+def test_banff_louise_symmetric_under_opposite_quiver(kind):
+    """Sources and sinks swap under reversal, so the verdict must not change."""
+    fn = getattr(la, f"{kind}_status")
+    small = dict(max_depth=6, timeout=5, cap=4)
+    for q in _random_quivers(7, 40):
+        assert fn(q, **small)[0] == fn(_opposite(q), **small)[0], q
+
+
+def test_banff_sink_witness_is_found():
+    """A quiver whose only extremal vertex is a sink must still pass via that sink."""
+    # Oriented 3-cycle (not acyclic) plus vertex 3 receiving an arrow from every
+    # cycle vertex: 3 is a sink, nothing is a source. Deleting the sink leaves
+    # the 3-cycle (mutation-acyclic), deleting a neighbour leaves an acyclic
+    # quiver, so the sink gives an immediate Banff witness.
+    q = to_matrix([[0, 1, -1, 1], [-1, 0, 1, 1], [1, -1, 0, 1], [-1, -1, -1, 0]])
+    assert la._sources(q) == [] and la._sinks(q) == [3]
+    ok, witness = la._check_condition(q, la._Ctx(8, 5, 4), "banff")
+    assert ok and witness["role"] == "sink" and witness["vertex"] == 3
+
+
 def test_local_acyclicity_never_false_when_truncated(markov):
     # With a tiny budget the search cannot finish; the answer must be unknown,
     # never a false "false".

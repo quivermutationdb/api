@@ -7,8 +7,8 @@ ported from the reference implementation onto qmd's core types.
 These properties are only semidecidable, so each public entry point returns a
 three-state result:
 
-    "true"     a witness (mutation sequence + source-deletion certificate) was
-               found  -> the quiver IS Banff / Louise / P'
+    "true"     a witness (mutation sequence + source/sink-deletion certificate)
+               was found  -> the quiver IS Banff / Louise / P'
     "false"    the search was provably exhaustive (the whole finite mutation
                class was covered with no depth / timeout / arrow-cap truncation
                anywhere) and no witness exists -> it is NOT
@@ -80,41 +80,63 @@ def _is_mutation_acyclic(q: Matrix, ctx: _Ctx) -> Optional[list[int]]:
     return None
 
 
-# --- recursive source-deletion conditions ---------------------------------
+# --- recursive source/sink-deletion conditions -----------------------------
+#
+# Banff and Louise use *covering pairs*: an arrow k -> j (or j -> k) through
+# which no directed cycle passes. Every arrow at a source or at a sink is a
+# covering pair, so both are tried; the search is symmetric under passing to
+# the opposite quiver (which swaps sources and sinks). P' is the
+# source-deletion condition as supplied (sources only).
 
 def _sources(q: Matrix) -> list[int]:
     n = len(q)
     return [k for k in range(n) if all(q[k][j] >= 0 for j in range(n))]
 
 
+def _sinks(q: Matrix) -> list[int]:
+    n = len(q)
+    return [k for k in range(n) if all(q[k][j] <= 0 for j in range(n))]
+
+
+def _extremal_vertices(q: Matrix) -> list[tuple[int, str]]:
+    """(vertex, 'source'|'sink') pairs; an isolated vertex is listed once, as a source."""
+    out = [(k, "source") for k in _sources(q)]
+    seen = {k for k, _ in out}
+    out.extend((k, "sink") for k in _sinks(q) if k not in seen)
+    return out
+
+
 def _check_condition(q: Matrix, ctx: _Ctx, kind: str):
-    """Banff/Louise/P' source-deletion condition on a single quiver."""
+    """Banff/Louise (source or sink) / P' (source) deletion condition on one quiver."""
     if is_acyclic(q):
         return (True, "acyclic")
     n = len(q)
-    for k in _sources(q):
+    candidates = ([(k, "source") for k in _sources(q)] if kind == "p_prime"
+                  else _extremal_vertices(q))
+    for k, role in candidates:
         ok_k, w_k = _is_cond_class(_delete_vertex(q, k), ctx, kind)
         if not ok_k:
             continue
         if kind == "p_prime":
-            return (True, {"source": k, "witness_k": w_k})
-        # banff / louise need a neighbor j
+            return (True, {"vertex": k, "role": role, "witness_k": w_k})
+        # banff / louise need a neighbour j of the extremal vertex k: every
+        # arrow at k is a covering pair (k -> j for a source, j -> k for a sink).
         for j in range(n):
-            adjacent = q[k][j] > 0 if kind == "banff" else (j != k and q[k][j] != 0)
-            if not adjacent:
+            if j == k or q[k][j] == 0:
                 continue
             ok_j, w_j = _is_cond_class(_delete_vertex(q, j), ctx, kind)
             if not ok_j:
                 continue
             if kind == "banff":
-                return (True, {"source": k, "neighbor": j,
+                return (True, {"vertex": k, "role": role, "neighbor": j,
                                "witness_k": w_k, "witness_j": w_j})
             # louise also needs Q\{k,j}
             q_kj = _delete_vertex(_delete_vertex(q, k), j - 1 if j > k else j)
             ok_kj, w_kj = _is_cond_class(q_kj, ctx, kind)
             if ok_kj:
-                return (True, {"source": k, "neighbor": j, "witness_k": w_k,
-                               "witness_j": w_j, "witness_kj": w_kj})
+                return (True, {"vertex": k, "role": role, "neighbor": j,
+                               "witness_k": w_k, "witness_j": w_j,
+                               "witness_kj": w_kj})
     return (False, None)
 
 
