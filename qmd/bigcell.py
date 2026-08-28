@@ -209,37 +209,69 @@ def _label_job(args):
 
 
 def stage_label(con, path: str, n: int, cap: int, workers: int, log, chunk: int = 200) -> None:
+    """
+    Give every quiver a finiteness verdict with a capped unlabeled BFS.
+
+    A crossing of the weight bound proves the whole explored set infinite
+    (Derksen–Owen) and a drained search proves it finite, so ONE exploration
+    usually settles up to `cap` quivers at once — the seeds are walked in id
+    order and any quiver already settled by a neighbour is skipped.
+
+    The walk is cursor-based (`id > last`): scanning for `label_done = 0` from
+    the start of the table instead would re-skip every settled row on every
+    batch, which is quadratic and grinds to a halt after a few million rows.
+    `label_done` is set only when a result is applied, so an interrupted run
+    never leaves a quiver marked-but-unresolved.
+    """
     if _stage_done(con, "label"):
         log("  label: done"); return
     import multiprocessing as mp
-    todo = con.execute("SELECT count(*) FROM quivers WHERE label_done = 0").fetchone()[0]
-    log(f"    labelling finiteness for {todo} quivers (cap {cap}) ...")
+    total = con.execute("SELECT count(*) FROM quivers").fetchone()[0]
+    already = con.execute("SELECT count(*) FROM quivers WHERE label_done = 1").fetchone()[0]
+    log(f"    labelling finiteness for {total - already} of {total} quivers (cap {cap}) ...")
 
     def batches():
-        rcon = sqlite3.connect(path, timeout=600)        # generator thread's own connection
+        rcon = sqlite3.connect(path, timeout=600)
+        last = ""
+        pending: list[tuple] = []
         while True:
-            # Quivers already labelled by a neighbour's exploration are skipped.
-            rows = rcon.execute("SELECT id, upper FROM quivers WHERE label_done = 0 ORDER BY id LIMIT ?", (chunk * workers,)).fetchall()
+            rows = rcon.execute(
+                "SELECT id, upper, label_done FROM quivers WHERE id > ? ORDER BY id LIMIT ?",
+                (last, chunk * workers * 4)).fetchall()
             if not rows:
-                rcon.close()
-                return
-            for i in range(0, len(rows), chunk):
-                yield (n, cap, rows[i:i + chunk])
-            rcon.execute("UPDATE quivers SET label_done = 1 WHERE id IN (SELECT id FROM quivers WHERE label_done = 0 ORDER BY id LIMIT ?)", (len(rows),))
-            rcon.commit()
+                break
+            last = rows[-1][0]
+            for qid, upper, done in rows:
+                if done:
+                    continue                     # settled by a neighbour's exploration
+                pending.append((qid, upper))
+                if len(pending) == chunk:
+                    yield (n, cap, pending)
+                    pending = []
+        if pending:
+            yield (n, cap, pending)
+        rcon.close()
 
-    done = 0
+    done = already
+    since_log = 0
     with mp.get_context("fork").Pool(workers) as pool:
         for out in pool.imap_unordered(_label_job, batches()):
             for value, qids in out:
                 if value is not None:
-                    con.executemany("UPDATE quivers SET mutation_finite = ?, label_done = 1 WHERE id = ? AND mutation_finite IS NULL",
-                                    [(value, q) for q in qids])
+                    con.executemany(
+                        "UPDATE quivers SET mutation_finite = ?, label_done = 1 "
+                        "WHERE id = ? AND mutation_finite IS NULL",
+                        [(value, q) for q in qids])
+                con.executemany("UPDATE quivers SET label_done = 1 WHERE id = ?",
+                                [(q,) for q in qids])
+                done += len(qids)
+                since_log += len(qids)
             con.commit()
-            done += len(out)
-            if done % (chunk * 50) == 0:
+            if since_log >= 200_000:
                 con.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-                log(f"    labelled {done}/{todo}")
+                log(f"    labelled {done}/{total}")
+                since_log = 0
+    con.commit()
     _mark(con, "label")
     counts = con.execute("SELECT mutation_finite, count(*) FROM quivers GROUP BY 1").fetchall()
     log(f"  label: done {dict((k if k is not None else 'unknown', v) for k, v in counts)}")

@@ -107,9 +107,10 @@ _REFERENCE: dict[int, dict[str, str]] = {}
 def reference_for(rank: int) -> dict[str, str]:
     """
     mc_id -> Dynkin name for every connected finite type of exactly this rank.
-    E8's class is 25,080 labeled matrices, so the table is cached on disk
-    (REFERENCE_CACHE) and computed once per process otherwise; call this in
-    the parent before forking a worker pool.
+    Building it explores each type's class: E8's is 1,574 distinct quivers
+    (its labeled orbit is far larger, which is why exploration is unlabeled).
+    The table is cached on disk (REFERENCE_CACHE) and computed once per process
+    otherwise; call this in the parent before forking a worker pool.
     """
     if rank in _REFERENCE:
         return _REFERENCE[rank]
@@ -152,7 +153,7 @@ def classify(canonical_rep: Matrix, mc_id: Optional[str] = None) -> Optional[str
 
     Only meaningful for completely explored classes. If the quiver is
     connected and its class id is known, pass `mc_id` to avoid re-exploring
-    the class (E8 alone is 25,080 matrices).
+    the class (E8 alone is 1,574 distinct quivers).
     """
     comps = _connected_components(canonical_rep)
     names: list[str] = []

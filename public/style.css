@@ -1179,3 +1179,23 @@ th.sort-disabled .sort-arrow { opacity: 0.25; }
   white-space: pre-wrap;
 }
 .llm-help .llm-body code { font-family: var(--mono); font-size: 0.85em; }
+
+/* --- wiki: caveat notes and the reference list ---------------------------- */
+.wiki-note {
+  border-left: 3px solid var(--rule-strong);
+  background: var(--bg-card);
+  padding: 0.6rem 0.9rem;
+  margin: 0.9rem 0;
+}
+.wiki-refs {
+  list-style: none;
+  padding-left: 0;
+  font-size: 0.88rem;
+}
+.wiki-refs li {
+  margin: 0.55rem 0;
+  padding-left: 5.5rem;
+  text-indent: -5.5rem;      /* hanging indent: the [Key] starts the line */
+  line-height: 1.5;
+}
+.wiki-refs b { font-family: var(--mono); font-size: 0.82rem; }
