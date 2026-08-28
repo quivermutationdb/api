@@ -48,59 +48,91 @@
     <li>Assessment of existing datasets and software resources suitable for inclusion</li>
   </ul>
 
+  <h2>Phase 1 — Core dataset and identifiers <span class="badge badge-closed" style="vertical-align:middle;margin-left:0.5rem">Complete</span></h2>
+
+  <h3>Goals</h3>
+  <ul>
+    <li>Define a canonical representation for quivers up to relabeling &mdash; the
+      lexicographically minimal exchange matrix over all relabelings, computed exactly</li>
+    <li>Assign stable, permanent identifiers to quivers and mutation classes
+      (<code>Q.n{rank}.{hash}</code>, <code>MC.n{rank}.{hash}</code>)</li>
+    <li>Assemble an initial corpus</li>
+    <li>Record basic invariants and metadata for each object</li>
+    <li>Set up a <a href="/wiki.html">wiki</a> for definitions of objects, invariants and other statistics</li>
+  </ul>
+
+  <h3>Deliverables</h3>
+  <ul>
+    <li>A publicly browsable list of <a href="/browse.html">quivers and mutation classes</a></li>
+    <li>Downloadable datasets in standard formats (CSV, Excel, NDJSON)</li>
+    <li>Clear documentation of data sources and assumptions on the <a href="/about.html">About</a> page</li>
+  </ul>
+
   <p>
-    This phase focuses on laying a stable conceptual and organizational foundation
-    before large-scale data ingestion or software development.
+    The corpus turned out to be better generated than imported: it is produced
+    exhaustively by one reproducible pipeline, so every object's provenance is the
+    pipeline itself rather than a citation to a file. Curated objects from the
+    literature can still be added later, with their origin recorded.
   </p>
 
-  <h2>Phase 1 — Core dataset and identifiers <span class="badge badge-dev" style="vertical-align:middle;margin-left:0.5rem">Current</span></h2>
+  <h2>Phase 2 — Search, filtering, and exploration metadata <span class="badge badge-closed" style="vertical-align:middle;margin-left:0.5rem">Complete</span></h2>
 
   <h3>Goals</h3>
   <ul>
-    <li>Define a canonical representation for quivers up to relabeling</li>
-    <li>Assign stable, permanent identifiers to quivers and mutation classes</li>
-    <li>Assemble an initial corpus of quivers from curated sources (e.g., literature, SageMath databases)</li>
-    <li>Record basic invariants and metadata for each object</li>
-    <li>Set up a wiki for definitions of objects, invariants, and other statistics</li>
-  </ul>
-
-  <h3>Deliverables</h3>
-  <ul>
-    <li>A publicly browsable list of quivers and mutation classes</li>
-    <li>Downloadable datasets in standard formats (e.g., CSV, JSON)</li>
-    <li>Clear documentation of data sources and assumptions</li>
-  </ul>
-
-  <h2>Phase 2 — Search, filtering, and exploration metadata</h2>
-
-  <h3>Goals</h3>
-  <ul>
-    <li>Enable search and filtering by basic invariants (e.g., number of vertices, acyclicity, known mutation-finite status)</li>
+    <li>Enable <a href="/search.html">search and filtering</a> by invariants &mdash; rank, Dynkin type,
+      representation type, edge weight, acyclicity, mutation-finiteness, class size</li>
     <li>Record exploration bounds for mutation classes, including partial or truncated computations</li>
-    <li>Provide mutation-neighborhood navigation for selected classes</li>
+    <li>Provide navigation between a quiver, its mutation class and that class's members</li>
   </ul>
 
   <h3>Deliverables</h3>
   <ul>
-    <li>Interactive browse and search interface</li>
+    <li>Interactive browse and search interface, including lookup by pasted exchange matrix
+      in any labeling</li>
     <li>Class pages documenting known members and exploration limits</li>
-    <li>Explicit distinction between fully enumerated and partially explored data</li>
+    <li>Explicit distinction between fully enumerated and partially explored data: every class
+      is <em>complete</em>, <em>bound</em> or <em>truncated</em>, and every semidecidable
+      property is <a href="/wiki.html#three-state">three-state</a></li>
   </ul>
 
-  <h2>Phase 3 — Computed invariants and reproducible code</h2>
+  <p>
+    Still open from this phase: navigating the mutation graph itself &mdash; stepping from a
+    quiver to the quivers one mutation away. It is carried into Phase&nbsp;3.
+  </p>
+
+  <h2>Phase 3 — Scale, computed invariants, and machine access <span class="badge badge-dev" style="vertical-align:middle;margin-left:0.5rem">Current</span></h2>
 
   <h3>Goals</h3>
   <ul>
-    <li>Expand the collection of computed invariants associated with quivers and mutation classes</li>
-    <li>Provide reproducible Python/SageMath or C++ code snippets illustrating definitions and computations</li>
-    <li>Track computational provenance and versioning</li>
+    <li><strong>Grow the census.</strong> Extend beyond small ranks to the largest cells that can be
+      enumerated exactly, and represent the rest by documented samples
+      <span class="badge badge-dev">in progress</span></li>
+    <li>Expand the collection of computed invariants associated with quivers and mutation classes
+      <span class="badge badge-closed">done</span></li>
+    <li>Provide reproducible code illustrating definitions and computations
+      <span class="badge badge-dev">wiki only</span></li>
+    <li>Track computational provenance and versioning
+      <span class="badge badge-closed">done</span></li>
+    <li>Make the whole dataset usable by programs and AI assistants, not just by browsers
+      <span class="badge badge-closed">done</span></li>
+    <li>Mutation-graph navigation (carried from Phase&nbsp;2)
+      <span class="badge badge-open">not started</span></li>
   </ul>
 
   <h3>Deliverables</h3>
   <ul>
-    <li>Expanded list of invariants with references and domain restrictions</li>
-    <li>Reproducible code examples embedded in object pages</li>
-    <li>Versioned datasets supporting reproducible research</li>
+    <li>Ranks 1&ndash;5 published as complete censuses; rank&nbsp;6 (over 42 million connected
+      quivers) in generation; rank&nbsp;7 and a rank&nbsp;8 sample containing E<sub>8</sub> to follow.
+      Live coverage is on the <a href="/about.html">About</a> page</li>
+    <li>Per-quiver invariants (acyclicity, bipartiteness, abundance, planarity, representation type,
+      symmetry group) and per-class properties (Dynkin type, mutation-acyclicity, Banff, Louise, P&prime;)
+      with recorded witnesses</li>
+    <li>Every rank stamped with the bound, node cap, generator, pipeline version and date that
+      produced it, readable at <a href="/api/stats">/api/stats</a></li>
+    <li>A documented read-only <a href="/api/openapi.json">JSON API</a>, resumable bulk export,
+      an <a href="https://modelcontextprotocol.io">MCP</a> server for AI assistants, and
+      <a href="/llms.txt">/llms.txt</a></li>
+    <li>Reproducible code examples embedded in object pages &mdash; still to do</li>
   </ul>
 
   <h2>Phase 4 — Community contributions and sustainability</h2>
@@ -118,6 +150,21 @@
     <li>Contribution documentation</li>
     <li>Long-term maintenance and governance plan</li>
   </ul>
+
+  <p>
+    A first step already exists: class <a href="/wiki.html#nicknames">nicknames</a> are curated in
+    the public repository and reviewed before they appear, and they survive regeneration of the
+    database.
+  </p>
+
+  <h2>Beyond the roadmap</h2>
+
+  <p>
+    Two extensions are design constraints rather than afterthoughts, and will arrive when the
+    census work settles: <strong>skew-symmetrizable</strong> exchange matrices (valued quivers),
+    and <strong>frozen vertices</strong> (ice quivers), which are what most applications to cluster
+    algebras actually use.
+  </p>
 
   <h2>Long-term vision</h2>
 

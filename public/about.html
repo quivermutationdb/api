@@ -104,56 +104,134 @@
   </p>
 
   <p><strong>What is included</strong><br />
-  The present release covers skew-symmetric integer quivers on
-  <strong>1&ndash;4 vertices</strong> whose exchange-matrix entries are bounded by
-  <strong>|b<sub>ij</sub>|&nbsp;&le;&nbsp;2</strong>
-  (the <a href="/wiki.html#max-edge">maximum edge weight</a>).
+  QMD is a <strong>census</strong>: for each rank <em>n</em> it contains
+  <em>every</em> connected skew-symmetric integer quiver whose exchange-matrix
+  entries satisfy |b<sub>ij</sub>|&nbsp;&le;&nbsp;<em>h</em> for a stated
+  <a href="/wiki.html#max-edge">weight bound</a> <em>h</em> &mdash; not a sample or a
+  selection from the literature. The counts below come from the live database, and
+  each is exactly the number of connected quivers in that cell (verified against an
+  independent Burnside count).
+  </p>
+
+  <div class="table-wrap">
+    <table id="coverage-table">
+      <thead>
+        <tr><th>Rank (vertices)</th><th>Weight bound |b<sub>ij</sub>| &le;</th>
+            <th style="text-align:right">Quivers</th><th style="text-align:right">Explored classes</th></tr>
+      </thead>
+      <tbody><tr><td colspan="4"><div class="state-msg">Loading coverage…</div></td></tr></tbody>
+    </table>
+  </div>
+
+  <p><strong>Disconnected quivers are excluded by design.</strong> A disconnected
+  quiver is a disjoint union of smaller ones, and its mutation class is the product
+  of theirs, so it carries no information the components do not; every quiver in the
+  database is connected.
+  </p>
+
+  <p><strong>Growing</strong><br />
+  Rank 6 (over 42 million connected quivers at |b<sub>ij</sub>|&nbsp;&le;&nbsp;2) is
+  being generated now, followed by rank 7 and a large sample of rank 8 that includes
+  E<sub>8</sub> and the other rank-8 finite types. Cells beyond that are not
+  enumerable in principle &mdash; the number of quivers on 10 vertices with
+  |b<sub>ij</sub>|&nbsp;&le;&nbsp;10 exceeds 10<sup>52</sup> &mdash; so larger ranks
+  will be represented by documented samples rather than complete censuses.
+  See the <a href="/roadmap.html">Roadmap</a>.
   </p>
 
   <p><strong>How it is built</strong><br />
-  The pipeline runs three deterministic steps:
+  The pipeline is deterministic and runs offline; the website only serves what it
+  produces.
   </p>
   <ol>
-    <li><strong>Seed enumeration.</strong> For each rank up to four, every
-    skew-symmetric matrix with entries in {&minus;2,&nbsp;&hellip;,&nbsp;2} is
-    enumerated, and one canonical representative is kept per quiver isomorphism
-    class &mdash; the lexicographically minimal matrix over all vertex
-    relabelings.</li>
-    <li><strong>Mutation exploration.</strong> From each seed, the mutation class
-    is explored by breadth-first search, applying quiver mutation until the class
-    closes up or a mutation would push an entry past the bound.</li>
-    <li><strong>Class assembly and identifiers.</strong> Orbits that share a
-    common quiver are merged into a single mutation class, and every quiver and
-    class is given a permanent identifier derived from a SHA-256 hash of its
-    canonical form.</li>
+    <li><strong>Enumeration.</strong> Each cell is enumerated by <em>orderly
+    generation</em> (canonical augmentation): quivers are grown one vertex at a
+    time and only the canonical representative of each isomorphism class is kept,
+    so every quiver is produced exactly once without ever listing the astronomically
+    many labelings. The count produced is checked against an independent formula
+    (Burnside over the symmetric group, corrected for connectedness); the two agree
+    exactly at every rank generated so far, including 42,514,454 at rank&nbsp;6.</li>
+    <li><strong>Canonical form.</strong> Each quiver is identified with the
+    lexicographically minimal matrix over all vertex relabelings, found by an exact
+    branch-and-bound search. This is a definition, not an implementation detail: the
+    identifier is a SHA-256 hash of that matrix, so it never depends on which
+    software or libraries were available.</li>
+    <li><strong>Mutation exploration.</strong> From each quiver, the mutation class
+    is explored breadth-first over <em>unlabeled</em> quivers (each mutation result
+    is canonicalised), until the class closes up, a mutation pushes an entry past
+    |b<sub>ij</sub>|&nbsp;&le;&nbsp;2, or a node cap is reached. Exploring unlabeled
+    quivers is what makes large classes tractable: the E<sub>8</sub> class is 1,574
+    quivers but tens of millions of labeled matrices.</li>
+    <li><strong>Finiteness without exploration.</strong> A quiver on three or more
+    vertices with some |b<sub>ij</sub>|&nbsp;&ge;&nbsp;3 is mutation-infinite
+    (Derksen&ndash;Owen), so it is recorded as such directly. This is why cells with
+    a high weight bound are affordable: at rank&nbsp;4 with
+    |b<sub>ij</sub>|&nbsp;&le;&nbsp;10, over 99.9% of quivers are settled this way.</li>
+    <li><strong>Class assembly and identifiers.</strong> Explorations that share a
+    quiver are merged into one mutation class, which is identified by the
+    lexicographically minimal matrix over all of its members.</li>
   </ol>
 
   <p><strong>Assumptions and limits</strong><br />
   These bounds matter when interpreting the data:
   </p>
   <ul>
-    <li><strong>Edge-weight bound.</strong> Enumeration and mutation are both
-    capped at |b<sub>ij</sub>|&nbsp;&le;&nbsp;2. A class is recorded as
-    <strong>open</strong> when a mutation would exceed this bound, so
-    &ldquo;open&rdquo; means the class escapes the current exploration window
-    &mdash; this includes genuinely
-    <a href="/wiki.html#mutation-finite">mutation-infinite</a> classes as well as
-    any that would only be captured at a higher bound. Classes marked
-    <strong>finite type</strong> were fully enumerated within the bound and are
-    complete.</li>
+    <li><strong>Two different bounds.</strong> The <em>cell</em> bound <em>h</em>
+    says which quivers are in the census. The <em>exploration</em> bound is always
+    2: mutation is followed until an entry would reach 3, because at rank&nbsp;&ge;&nbsp;3
+    that already proves the class
+    <a href="/wiki.html#mutation-finite">mutation-infinite</a>. So an
+    <strong>open</strong> class at rank&nbsp;&ge;&nbsp;3 is genuinely infinite, not
+    merely outside a window; classes marked <strong>finite</strong> were explored to
+    exhaustion.</li>
+    <li><strong>Explored versus labelled.</strong> Not every quiver has a stored
+    mutation class. Those settled by the Derksen&ndash;Owen criterion carry a
+    finiteness verdict with no class row (<code>explored: false</code>), and at
+    rank&nbsp;6 mutation classes are stored for a documented sample. Nothing is
+    guessed: a value is either computed within stated bounds or reported as
+    <a href="/wiki.html#three-state">unknown</a>.</li>
+    <li><strong>Labeled orbits.</strong> The full list of labeled exchange matrices
+    is stored only for finite classes small enough to hold one (about 200,000
+    matrices); larger classes are described by their distinct quivers. Class pages
+    say which case applies.</li>
+    <li><strong>Truncated searches.</strong> Exploration stops at a node cap. A
+    class stopped that way is marked <strong>truncated</strong> and gets no
+    finiteness verdict, no Dynkin label, and no exact size &mdash; never a
+    provisional answer.</li>
     <li><strong>Matrix type.</strong> Only skew-symmetric integer matrices are
     included. Skew-symmetrizable matrices and frozen vertices are planned but not
     yet present.</li>
-    <li><strong>Rank.</strong> Only ranks 1&ndash;4 are currently generated;
-    higher ranks are planned (see the <a href="/roadmap.html">Roadmap</a>).</li>
     <li><strong>Reproducibility.</strong> The pipeline is deterministic: canonical
     forms and identifiers depend only on the matrices themselves, so re-running it
-    reproduces the same database exactly.</li>
+    reproduces the same database exactly. Each rank records the bound, node cap,
+    generator, pipeline version and date that produced it; they are returned by
+    <a href="/api/stats">/api/stats</a>.</li>
   </ul>
 
   <p>
     This follows QMD's soundness-first principle: every recorded value is either
     fully computed within stated bounds or explicitly flagged as partial.
+  </p>
+
+  <h2>Using the data</h2>
+
+  <p>
+    Everything on this site is available as data. Browse and
+    <a href="/search.html">search</a> in the browser, download any filtered cut as
+    CSV or Excel, or use the JSON API directly &mdash; it is read-only, needs no key,
+    and is described by an <a href="/api/openapi.json">OpenAPI document</a>.
+    If you have a matrix rather than an identifier, the
+    <a href="/search.html">Search</a> page will canonicalise it and take you to the
+    right quiver, in any labeling.
+  </p>
+
+  <p>
+    For programs, <a href="/api/export.ndjson?rank=4&amp;limit=5">/api/export.ndjson</a>
+    streams a whole cut and is resumable; for AI assistants there is a
+    <a href="https://modelcontextprotocol.io">Model Context Protocol</a> server at
+    <code>https://quivermutationdb.org/mcp</code> and a summary for language models at
+    <a href="/llms.txt">/llms.txt</a>. Definitions of every field are in the
+    <a href="/wiki.html">Wiki</a>.
   </p>
 
   <h2>Contact and contributions</h2>
@@ -186,6 +264,28 @@ GET https://quivermutationdb.org/api/export.ndjson?rank=5&amp;limit=5000        
     </div>
   </details>
 </section>
+<script>
+// Coverage table: always the live database, never a number that can go stale.
+(async () => {
+  const tbody = document.querySelector('#coverage-table tbody');
+  const fmt = n => n.toLocaleString('en-US');
+  try {
+    const res = await fetch('/api/stats');
+    if (!res.ok) throw new Error(String(res.status));
+    const d = await res.json();
+    tbody.innerHTML = d.by_rank.map(r =>
+      `<tr><td>${r.n}</td><td class="mono">${r.bound ?? '—'}</td>` +
+      `<td class="mono" style="text-align:right">${fmt(r.distinct_quivers)}</td>` +
+      `<td class="mono" style="text-align:right">${fmt(r.mutation_classes)}</td></tr>`).join('')
+      + `<tr><td colspan="2"><b>Total</b></td>` +
+        `<td class="mono" style="text-align:right"><b>${fmt(d.distinct_quivers)}</b></td>` +
+        `<td class="mono" style="text-align:right"><b>${fmt(d.mutation_classes)}</b></td></tr>`;
+  } catch (e) {
+    console.error(e);
+    tbody.innerHTML = '<tr><td colspan="4"><div class="state-msg">Coverage is temporarily unavailable — see <a href="/api/stats" style="color:var(--accent)">/api/stats</a>.</div></td></tr>';
+  }
+})();
+</script>
 <footer>
   <span>Quiver Mutation Database (QMD)</span>
   <span><a href="/acknowledge.html">Acknowledge</a> &middot; <a href="mailto:jackson@icarm.io">jackson@icarm.io</a></span>

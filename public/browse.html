@@ -48,14 +48,6 @@
       </select>
     </div>
     <div class="filter-group">
-      <label for="filter-connected">Connected</label>
-      <select id="filter-connected">
-        <option value="">All</option>
-        <option value="true">Connected</option>
-        <option value="false">Disconnected</option>
-      </select>
-    </div>
-    <div class="filter-group">
       <label for="filter-open">Class type</label>
       <select id="filter-open">
         <option value="">All</option>
@@ -93,7 +85,6 @@
           <th>Rep. type <a class="col-info" href="/wiki.html#representation-type" title="Definition" aria-label="Representation type definition">ⓘ</a></th>
           <th data-col="max_edge">Max edge <a class="col-info" href="/wiki.html#max-edge" title="Definition" aria-label="Max edge definition">ⓘ</a> <span class="sort-arrow">↕</span></th>
           <th>Acyclic <a class="col-info" href="/wiki.html#acyclic" title="Definition" aria-label="Acyclic definition">ⓘ</a></th>
-          <th>Connected <a class="col-info" href="/wiki.html#connected" title="Definition" aria-label="Connected definition">ⓘ</a></th>
           <th>Bipartite <a class="col-info" href="/wiki.html#bipartite" title="Definition" aria-label="Bipartite definition">ⓘ</a></th>
           <th data-col="class_type">Class <a class="col-info" href="/wiki.html#mutation-finite" title="Definition" aria-label="Class type definition">ⓘ</a> <span class="sort-arrow">↕</span></th>
           <th data-col="class_size">Mutation class size <a class="col-info" href="/wiki.html#mutation-class-size" title="Definition" aria-label="Mutation class size definition">ⓘ</a> <span class="sort-arrow">↕</span></th>
@@ -102,7 +93,7 @@
         </tr>
       </thead>
       <tbody id="table-body">
-        <tr><td colspan="12">
+        <tr><td colspan="11">
           <div class="state-msg">
             <div class="spinner"></div>
             Loading quivers…
@@ -172,7 +163,7 @@ async function fetchQuivers(page = 1) {
 
 function renderError() {
   document.getElementById('api-status').textContent = 'unavailable';
-  document.getElementById('table-body').innerHTML = `<tr><td colspan="12">
+  document.getElementById('table-body').innerHTML = `<tr><td colspan="11">
     <div class="state-msg">The database is temporarily unavailable. Please try again shortly.</div>
   </td></tr>`;
   document.getElementById('pagination').innerHTML = '';
@@ -187,7 +178,7 @@ function renderTable(data) {
     scope === 'labelings' ? 'labeled quivers' : 'quivers';
 
   if (!data.items || data.items.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="12">
+    tbody.innerHTML = `<tr><td colspan="11">
       <div class="state-msg">
         <span class="mono-label">No results</span>
         No quivers match the current filters.
@@ -206,7 +197,6 @@ function renderTable(data) {
       <td class="mono">${q.representation_type ? q.representation_type.charAt(0).toUpperCase() + q.representation_type.slice(1) : DASH}</td>
       <td class="mono">${q.max_edge ?? DASH}</td>
       <td class="mono">${yncell(q.is_acyclic)}</td>
-      <td class="mono">${yncell(q.is_connected)}</td>
       <td class="mono">${yncell(q.is_bipartite)}</td>
       <td>${classBadge(q)}</td>
       <td class="mono">${classSizeCell(q)}</td>
@@ -295,11 +285,9 @@ function setScope(s) {
 function applyFilters() {
   filters = {};
   const rank = document.getElementById('filter-rank').value;
-  const connected = document.getElementById('filter-connected').value;
   const open = document.getElementById('filter-open').value;
   const dynkin = document.getElementById('filter-dynkin').value.trim();
   if (rank)      filters.rank = rank;
-  if (connected) filters.is_connected = connected;
   if (open)      filters.is_open = open;
   if (dynkin)    filters.dynkin_type = dynkin;
   currentPage = 1;
@@ -308,7 +296,6 @@ function applyFilters() {
 
 function resetFilters() {
   document.getElementById('filter-rank').value = '';
-  document.getElementById('filter-connected').value = '';
   document.getElementById('filter-open').value = '';
   document.getElementById('filter-dynkin').value = '';
   filters = {};

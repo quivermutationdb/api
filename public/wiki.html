@@ -189,7 +189,10 @@
         for w in adj[v]:
             if w not in seen: seen.add(w); stack.append(w)
     return len(seen) == n</code></pre>
-      </section>
+              <p><b>Every quiver in QMD is connected.</b> A disconnected quiver is a disjoint union of
+        smaller quivers and its mutation class is the product of theirs, so the census stores the
+        components instead; there is no filter for it because there is nothing to filter.</p>
+</section>
 
       <section class="wiki-section" id="max-edge">
         <h2>Max edge weight</h2>

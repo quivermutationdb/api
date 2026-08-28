@@ -111,7 +111,6 @@
       <label>Properties</label>
       <div class="checkboxes">
         <label class="checkbox-pill"><input type="checkbox" id="f-acyclic"> acyclic</label>
-        <label class="checkbox-pill"><input type="checkbox" id="f-connected"> connected</label>
         <label class="checkbox-pill"><input type="checkbox" id="f-simply-laced"> simply-laced</label>
         <label class="checkbox-pill"><input type="checkbox" id="f-mutation-finite"> mutation-finite</label>
       </div>
@@ -156,7 +155,8 @@ async function lookupMatrix() {
     const data = await res.json();
     if (!res.ok) { out.textContent = data.detail || 'Invalid matrix.'; return; }
     if (data.found) { location.href = `/quiver.html?id=${encodeURIComponent(data.qmd_id)}`; return; }
-    out.innerHTML = `Not in the census (canonical id <code>${esc(data.qmd_id)}</code>, rank ${data.num_vertices}, max |b<sub>ij</sub>| ${data.max_edge}${data.is_connected ? '' : ', disconnected'}). `
+    out.innerHTML = `Not in the census (canonical id <code>${esc(data.qmd_id)}</code>, rank ${data.num_vertices}, max |b<sub>ij</sub>| ${data.max_edge}). `
+      + (data.is_connected ? '' : 'This quiver is <b>disconnected</b>; QMD holds connected quivers only — look up its connected components instead. ')
       + 'Canonical form: <code>' + esc(JSON.stringify(data.canonical_matrix)) + '</code>';
   } catch (e) {
     out.textContent = 'The database is temporarily unavailable.';
@@ -188,7 +188,6 @@ function getFilters() {
   const omin    = document.getElementById('f-orbit-min').value;
   const omax    = document.getElementById('f-orbit-max').value;
   const acyclic = document.getElementById('f-acyclic').checked;
-  const conn    = document.getElementById('f-connected').checked;
   const laced   = document.getElementById('f-simply-laced').checked;
   const mfin    = document.getElementById('f-mutation-finite').checked;
 
@@ -200,7 +199,6 @@ function getFilters() {
   if (omin)    f.orbit_min = omin;
   if (omax)    f.orbit_max = omax;
   if (acyclic) f.is_acyclic = 'true';
-  if (conn)    f.is_connected = 'true';
   if (laced)   f.is_simply_laced = 'true';
   if (mfin)    f.is_mutation_finite = 'true';
   return f;
@@ -211,7 +209,7 @@ function renderActivePills(filters) {
     rank: 'rank', dynkin_type: 'dynkin', representation_type: 'rep. type', max_edge: 'max edge',
     is_open: v => v === 'true' ? 'open' : 'finite type',
     orbit_min: v => `class size ≥ ${v}`, orbit_max: v => `class size ≤ ${v}`,
-    is_acyclic: 'acyclic', is_connected: 'connected',
+    is_acyclic: 'acyclic',
     is_simply_laced: 'simply-laced', is_mutation_finite: 'mutation-finite',
   };
   return Object.entries(filters).map(([k, v]) => {
@@ -244,7 +242,6 @@ function removeFilter(key) {
     orbit_min: () => document.getElementById('f-orbit-min').value = '',
     orbit_max: () => document.getElementById('f-orbit-max').value = '',
     is_acyclic: () => document.getElementById('f-acyclic').checked = false,
-    is_connected: () => document.getElementById('f-connected').checked = false,
     is_simply_laced: () => document.getElementById('f-simply-laced').checked = false,
     is_mutation_finite: () => document.getElementById('f-mutation-finite').checked = false,
   };
@@ -314,7 +311,6 @@ function renderResults(data, filters) {
       <td class="mono">${q.representation_type ? q.representation_type.charAt(0).toUpperCase() + q.representation_type.slice(1) : '—'}</td>
       <td class="mono">${q.max_edge ?? DASH}</td>
       <td class="mono">${yncell(q.is_acyclic)}</td>
-      <td class="mono">${yncell(q.is_connected)}</td>
       <td class="mono">${yncell(q.is_bipartite)}</td>
       <td>${classBadge(q)}</td>
       <td class="mono">${q.class_size ?? ((q.mutation_finite === false || q.is_open) ? '∞' : '—')}</td>
@@ -338,7 +334,6 @@ function renderResults(data, filters) {
             <th>Rep. type <a class="col-info" href="/wiki.html#representation-type" title="Definition" aria-label="Representation type definition">ⓘ</a></th>
             <th>Max edge <a class="col-info" href="/wiki.html#max-edge" title="Definition" aria-label="Max edge definition">ⓘ</a></th>
             <th>Acyclic <a class="col-info" href="/wiki.html#acyclic" title="Definition" aria-label="Acyclic definition">ⓘ</a></th>
-            <th>Connected <a class="col-info" href="/wiki.html#connected" title="Definition" aria-label="Connected definition">ⓘ</a></th>
             <th>Bipartite <a class="col-info" href="/wiki.html#bipartite" title="Definition" aria-label="Bipartite definition">ⓘ</a></th>
             <th>Class <a class="col-info" href="/wiki.html#mutation-finite" title="Definition" aria-label="Class type definition">ⓘ</a></th>
             <th>Mutation class size <a class="col-info" href="/wiki.html#mutation-class-size" title="Definition" aria-label="Mutation class size definition">ⓘ</a></th>
@@ -356,7 +351,7 @@ function resetSearch() {
     if (el.tagName === 'SELECT') el.value = '';
     else el.value = '';
   });
-  ['f-acyclic','f-connected','f-simply-laced','f-mutation-finite'].forEach(id => {
+  ['f-acyclic','f-simply-laced','f-mutation-finite'].forEach(id => {
     document.getElementById(id).checked = false;
   });
   document.getElementById('results-area').innerHTML = '';
@@ -369,7 +364,7 @@ const URL_FIELDS = {
   max_edge: 'f-maxedge', is_open: 'f-open', orbit_min: 'f-orbit-min', orbit_max: 'f-orbit-max',
 };
 const URL_CHECKS = {
-  is_acyclic: 'f-acyclic', is_connected: 'f-connected',
+  is_acyclic: 'f-acyclic',
   is_simply_laced: 'f-simply-laced', is_mutation_finite: 'f-mutation-finite',
 };
 (function initFromUrl() {
