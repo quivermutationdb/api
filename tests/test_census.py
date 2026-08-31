@@ -150,6 +150,17 @@ def test_bigcell_pipeline_matches_normal_pipeline(tmp_path):
     assert ca == cb                                   # sample = whole cell -> identical classes
     assert a.execute("SELECT count(*) FROM labelings").fetchone()[0] == b.execute("SELECT count(*) FROM labelings").fetchone()[0]
 
+    # The manifests must be interchangeable: bigcell claims "the same manifest
+    # format as export_ranks", and import-d1.sh/verify-export.py both ITERATE
+    # manifest["ranks"], so a stray non-numeric key there breaks the import.
+    # Reading one rank by key (as the loader above does) hides exactly that bug.
+    ma = json.load(open(os.path.join(str(tmp_path), "manifest.json")))
+    mb = json.load(open(os.path.join(str(ref_dir), "manifest.json")))
+    assert ma["pipeline_version"] == mb["pipeline_version"]     # top level, not inside "ranks"
+    assert all(k.isdigit() for k in ma["ranks"]), sorted(ma["ranks"])
+    assert sorted(ma["ranks"]["4"]) == sorted(mb["ranks"]["4"]), "rank entry shape differs"
+    assert ma["ranks"]["4"]["census_size"] == mb["ranks"]["4"]["census_size"]
+
 
 def test_curated_seeds_are_connected():
     import json

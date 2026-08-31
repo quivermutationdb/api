@@ -555,7 +555,11 @@ def export_big_cell(out_dir: str, *, n: int, h: int, label_cap: int = 20, node_c
 
     manifest_path = os.path.join(out_dir, "manifest.json")
     manifest = _load_json(manifest_path) or {"ranks": {}}
-    manifest.setdefault("ranks", {})["pipeline_version"] = PIPELINE_VERSION
+    manifest.setdefault("ranks", {})
+    # pipeline_version is a TOP-LEVEL key (d1_export writes it there). Putting it
+    # inside "ranks" makes the rank map contain a non-numeric key, which breaks
+    # every consumer that iterates it — verify-export.py and import-d1.sh.
+    manifest["pipeline_version"] = PIPELINE_VERSION
     manifest["ranks"][str(n)] = {
         "parts": parts,
         "depends_on": {f"acyclicity-n{j}.json": _sha256_file(os.path.join(out_dir, f"acyclicity-n{j}.json")) for j in range(1, n)},
@@ -563,6 +567,12 @@ def export_big_cell(out_dir: str, *, n: int, h: int, label_cap: int = 20, node_c
                      "sample": sample, "la_timeout": la_timeout, "schema": 3},
         "quiver_count": con.execute("SELECT count(*) FROM quivers").fetchone()[0],
         "class_count": len(class_rows["mutation_classes"]),
+        # The three fields below are what the other ranks carry; without them the
+        # rank-6 entry is not interchangeable with an export_ranks one.
+        "labeled_quiver_count": sum(r["class_size"] or 0 for r in class_rows["mutation_classes"]),
+        "truncated_classes": sum(1 for r in class_rows["mutation_classes"]
+                                 if r["exploration"] == "truncated"),
+        "census_size": census.count_connected_quivers(n, h),
         "generated_at": _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
     }
     _atomic_write(manifest_path, json.dumps(manifest, indent=2, sort_keys=True))
