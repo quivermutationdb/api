@@ -7,15 +7,16 @@
 #   tail -f dist/census-r6.log
 #   pkill -f 'bigcell'                       # to stop it
 #
-# `caffeinate -i` is applied automatically so the machine will not idle-sleep
-# while the job runs (a closed lid still sleeps; keep the lid open).
+# `caffeinate -s` is applied automatically: it prevents *system* sleep while on
+# AC power, which is what survives a closed lid. (`-i` only blocks idle sleep —
+# a rank-6 run lost three days to a shut lid before this was changed.)
 set -euo pipefail
 LOG=${1:?usage: run-detached.sh LOGFILE COMMAND...}; shift
 [ $# -gt 0 ] || { echo "no command given" >&2; exit 2; }
 mkdir -p "$(dirname "$LOG")"
 exec /usr/bin/python3 -c '
 import os, sys
-log, cmd = sys.argv[1], ["caffeinate", "-i", *sys.argv[2:]]
+log, cmd = sys.argv[1], ["caffeinate", "-s", *sys.argv[2:]]
 if os.fork():                      # parent: report and return to the shell
     sys.exit(0)
 os.setsid()                        # child: new session, no controlling terminal

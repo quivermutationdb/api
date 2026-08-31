@@ -46,6 +46,10 @@ from qmd.d1_export import (
 )
 from qmd.encoding import decode_upper, encode_upper
 
+# Page cache for every scratch connection, in KiB (2 GB). The label stage
+# seeks random primary keys across a 7 GB table; without this it is disk-bound.
+CACHE_KIB = int(os.environ.get("QMD_SQLITE_CACHE_KIB", 2_000_000))
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS quivers (
   id TEXT PRIMARY KEY, upper TEXT NOT NULL,
@@ -55,6 +59,14 @@ CREATE TABLE IF NOT EXISTS quivers (
   invariants_done INTEGER DEFAULT 0, label_done INTEGER DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS stages (name TEXT PRIMARY KEY, done INTEGER, info TEXT);
+-- How far a stage's id-ordered walk has committed. The label stage resumes
+-- from here instead of re-walking (and re-skipping) the settled prefix.
+CREATE TABLE IF NOT EXISTS watermarks (stage TEXT PRIMARY KEY, last_id TEXT NOT NULL);
+-- Verdicts are APPENDED here, never written into `quivers` row by row: a
+-- scattered `UPDATE quivers ... WHERE id = ?` costs one random page read per
+-- row against a multi-GB table, which is what stalled the first attempt.
+-- stage_label_apply folds this table into `quivers` in a single id-ordered pass.
+CREATE TABLE IF NOT EXISTS label_verdicts (id TEXT PRIMARY KEY, value INTEGER);
 -- Parents whose extension has been committed: the generate stage resumes from
 -- here, so a kill costs at most one commit batch instead of the whole stage.
 CREATE TABLE IF NOT EXISTS parents_done (idx INTEGER PRIMARY KEY);
@@ -68,6 +80,11 @@ def _db(path: str) -> sqlite3.Connection:
     con.executescript(SCHEMA)
     con.execute("PRAGMA journal_mode=WAL")
     con.execute("PRAGMA synchronous=NORMAL")
+    # A 2 MB default page cache against a multi-GB table means one synchronous
+    # disk read per random primary-key seek. Give it room (negative = KiB).
+    con.execute(f"PRAGMA cache_size=-{CACHE_KIB}")
+    con.execute("PRAGMA temp_store=MEMORY")
+    con.execute("PRAGMA mmap_size=%d" % (8 << 30))
     return con
 
 
@@ -79,6 +96,15 @@ def _stage_done(con, name) -> bool:
 def _mark(con, name, info=None) -> None:
     con.execute("INSERT OR REPLACE INTO stages VALUES (?, 1, ?)", (name, json.dumps(info or {})))
     con.commit()
+
+
+def _watermark(con, stage: str) -> str:
+    r = con.execute("SELECT last_id FROM watermarks WHERE stage=?", (stage,)).fetchone()
+    return r[0] if r else ""
+
+
+def _set_watermark(con, stage: str, last_id: str) -> None:
+    con.execute("INSERT OR REPLACE INTO watermarks VALUES (?, ?)", (stage, last_id))
 
 
 # ---------------------------------------------------------------------------
@@ -195,7 +221,10 @@ def stage_invariants(con, path: str, n: int, workers: int, log, chunk: int = 200
 # ---------------------------------------------------------------------------
 
 def _label_job(args):
-    n, cap, rows = args
+    """`seq` is echoed back so the caller can advance its watermark only past
+    batches whose verdicts it has committed (imap_unordered completes out of
+    order)."""
+    seq, n, cap, rows = args
     out = []
     for qid, upper in rows:
         orbit = _bfs_unlabeled(decode_upper(n, upper), EXPLORE_BOUND, cap)
@@ -205,76 +234,182 @@ def _label_job(args):
             out.append((1, sorted(orbit.qid_set)))
         else:                                  # truncated without a crossing: unknown
             out.append((None, [qid]))
-    return out
+    return seq, out
 
 
-def stage_label(con, path: str, n: int, cap: int, workers: int, log, chunk: int = 200) -> None:
+def _seed_label_watermark(con, path: str, log, chunk: int = 50_000) -> str:
+    """
+    Advance the label watermark over the already-settled prefix, committing as
+    it goes, and return where the real work starts.
+
+    The first attempt at this stage settled a contiguous prefix of ~4.5 M rows
+    and recorded no position, so every restart re-walked it (~13 minutes) before
+    finding anything to do. Walking it once and committing the watermark makes
+    that cost one-time and interruptible. Rows settled out of order by a
+    neighbour's exploration are simply skipped again later — the watermark only
+    ever moves over a run of fully settled rows.
+    """
+    last = _watermark(con, "label")
+    moved = 0
+    while True:
+        rows = con.execute(
+            "SELECT id, mutation_finite, label_done FROM quivers WHERE id > ? ORDER BY id LIMIT ?",
+            (last, chunk)).fetchall()
+        if not rows:
+            break
+        stop = None
+        for qid, known, done in rows:
+            if known is None and not done:
+                stop = qid
+                break
+            last = qid
+            moved += 1
+        if last != _watermark(con, "label"):
+            _set_watermark(con, "label", last)
+            con.commit()
+        if stop is not None:
+            break
+        if moved % 1_000_000 < chunk:
+            log(f"    skipped {moved} already-settled rows (id <= {last})")
+    if moved:
+        log(f"    resume: skipped {moved} settled rows, work starts after {last!r}")
+    return last
+
+
+def stage_label(con, path: str, n: int, cap: int, workers: int, log, chunk: int = 200,
+                log_every: int = 20_000) -> None:
     """
     Give every quiver a finiteness verdict with a capped unlabeled BFS.
 
     A crossing of the weight bound proves the whole explored set infinite
     (Derksen–Owen) and a drained search proves it finite, so ONE exploration
     usually settles up to `cap` quivers at once — the seeds are walked in id
-    order and any quiver already settled by a neighbour is skipped.
+    order and any quiver already settled is skipped.
 
-    The walk is cursor-based (`id > last`): scanning for `label_done = 0` from
-    the start of the table instead would re-skip every settled row on every
-    batch, which is quadratic and grinds to a halt after a few million rows.
-    `label_done` is set only when a result is applied, so an interrupted run
-    never leaves a quiver marked-but-unresolved.
+    Two rules keep this affordable at 42 M rows, both learned the hard way:
+
+    * The walk resumes from a committed **watermark**, not from a scan for
+      unsettled rows. Re-scanning from the start re-skips every settled row on
+      every batch (quadratic); walking the settled prefix again on each restart
+      cost 13 minutes before this.
+    * Verdicts are **appended** to `label_verdicts`, never written into
+      `quivers` row by row. A scattered `UPDATE quivers ... WHERE id = ?` costs
+      one random page read per row against a 7 GB table — profiling the first
+      attempt found 90 % of the writer's time inside that seek, at a rate that
+      would have taken weeks. `stage_label_apply` folds the verdicts in one
+      id-ordered pass, which traverses the B-tree sequentially instead.
+
+    `mutation_finite` is the only ledger of what is settled, so an interrupted
+    run never leaves a quiver marked-but-unresolved, and the verdicts already
+    on disk are inherited by the next run.
     """
     if _stage_done(con, "label"):
         log("  label: done"); return
     import multiprocessing as mp
     total = con.execute("SELECT count(*) FROM quivers").fetchone()[0]
-    already = con.execute("SELECT count(*) FROM quivers WHERE label_done = 1").fetchone()[0]
-    log(f"    labelling finiteness for {total - already} of {total} quivers (cap {cap}) ...")
+    # Fold in anything a killed run left staged, so the skip test below sees it.
+    stage_label_apply(con, log)
+    start = _seed_label_watermark(con, path, log)
+    log(f"    labelling finiteness of {total} quivers (cap {cap}) from id > {start!r} ...")
+
+    # Ids of the quivers each yielded batch covers, so the watermark only
+    # advances past a batch whose verdicts have been committed.
+    covers: dict[int, str] = {}
 
     def batches():
-        rcon = sqlite3.connect(path, timeout=600)
-        last = ""
+        rcon = _db(path)
+        last = start
         pending: list[tuple] = []
+        seq = 0
         while True:
             rows = rcon.execute(
-                "SELECT id, upper, label_done FROM quivers WHERE id > ? ORDER BY id LIMIT ?",
+                "SELECT id, upper, mutation_finite, label_done FROM quivers "
+                "WHERE id > ? ORDER BY id LIMIT ?",
                 (last, chunk * workers * 4)).fetchall()
             if not rows:
                 break
             last = rows[-1][0]
-            for qid, upper, done in rows:
-                if done:
-                    continue                     # settled by a neighbour's exploration
+            for qid, upper, known, done_row in rows:
+                # Settled here or by a neighbour's exploration — or explored and
+                # left *unknown* (truncated, no crossing), which re-exploring at
+                # the same cap cannot improve. Same test as _seed_label_watermark.
+                if known is not None or done_row:
+                    continue
                 pending.append((qid, upper))
                 if len(pending) == chunk:
-                    yield (n, cap, pending)
+                    seq += 1
+                    covers[seq] = pending[-1][0]
+                    yield (seq, n, cap, pending)
                     pending = []
         if pending:
-            yield (n, cap, pending)
+            seq += 1
+            covers[seq] = pending[-1][0]
+            yield (seq, n, cap, pending)
         rcon.close()
 
-    done = already
+    done = 0
     since_log = 0
+    high = start
     with mp.get_context("fork").Pool(workers) as pool:
-        for out in pool.imap_unordered(_label_job, batches()):
+        for seq, out in pool.imap_unordered(_label_job, batches()):
             for value, qids in out:
-                if value is not None:
-                    con.executemany(
-                        "UPDATE quivers SET mutation_finite = ?, label_done = 1 "
-                        "WHERE id = ? AND mutation_finite IS NULL",
-                        [(value, q) for q in qids])
-                con.executemany("UPDATE quivers SET label_done = 1 WHERE id = ?",
-                                [(q,) for q in qids])
+                con.executemany("INSERT OR IGNORE INTO label_verdicts VALUES (?, ?)",
+                                [(q, value) for q in qids])
                 done += len(qids)
                 since_log += len(qids)
+            # imap_unordered may complete out of order; only advance the
+            # watermark monotonically, so at worst a batch is recomputed.
+            edge = covers.pop(seq, None)
+            if edge is not None and edge > high:
+                high = edge
+                _set_watermark(con, "label", high)
             con.commit()
-            if since_log >= 200_000:
-                con.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-                log(f"    labelled {done}/{total}")
+            if since_log >= log_every:
+                # Draining here keeps the staging table small and `quivers` up
+                # to date, so the walk's skip test stays effective.
+                stage_label_apply(con, log)
+                log(f"    labelled {done} this run of {total} total (id <= {high})")
                 since_log = 0
     con.commit()
+    stage_label_apply(con, log)
     _mark(con, "label")
     counts = con.execute("SELECT mutation_finite, count(*) FROM quivers GROUP BY 1").fetchall()
     log(f"  label: done {dict((k if k is not None else 'unknown', v) for k, v in counts)}")
+
+
+def stage_label_apply(con, log, chunk: int = 200_000) -> int:
+    """
+    Drain `label_verdicts` into `quivers.mutation_finite` in one id-ordered pass.
+
+    Both tables are walked in primary-key order, so writes hit the target
+    B-tree sequentially instead of seeking once per row — the whole reason
+    verdicts are staged rather than written where they are produced.
+
+    Applied rows are deleted in the same transaction, so the staging table
+    stays small and the pass is cheap enough to run periodically and on resume.
+    `mutation_finite IS NULL` guards the write: a truncated search without a
+    crossing records its seed as *unknown* (value NULL), and unknown must never
+    overwrite a verdict some other exploration proved.
+    """
+    applied = 0
+    while True:
+        rows = con.execute("SELECT id, value FROM label_verdicts ORDER BY id LIMIT ?",
+                           (chunk,)).fetchall()
+        if not rows:
+            break
+        known = [(v, q) for q, v in rows if v is not None]
+        if known:
+            con.executemany("UPDATE quivers SET mutation_finite = ?, label_done = 1 "
+                            "WHERE id = ? AND mutation_finite IS NULL", known)
+        con.executemany("UPDATE quivers SET label_done = 1 WHERE id = ?",
+                        [(q,) for q, _ in rows])
+        con.executemany("DELETE FROM label_verdicts WHERE id = ?", [(q,) for q, _ in rows])
+        con.commit()
+        con.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        applied += len(rows)
+    if applied:
+        log(f"    applied {applied} staged verdicts")
+    return applied
 
 
 # ---------------------------------------------------------------------------

@@ -102,6 +102,35 @@ quivers only — a disconnected quiver is a disjoint union):
 
 ## 6. Operating the census (maintainer)
 
+### Running the rank-6 job (learned the hard way)
+
+Three properties of the machine, not the mathematics, cost this stage several
+days; `scripts/run-rank6.sh` encodes all three.
+
+* **Never write verdicts into `quivers` row by row.** A scattered
+  `UPDATE quivers SET ... WHERE id = ?` against the 7 GB scratch table costs one
+  random page read per row. Profiling the first attempt found 90 % of the
+  writer's time inside `sqlite3BtreeTableMoveto → readDbPage → unixRead`, at a
+  rate that would have needed weeks for a stage whose *compute* is ~2 hours.
+  The label stage now appends to `label_verdicts` and folds it into `quivers` in
+  one id-ordered pass (`stage_label_apply`), so the B-tree is walked
+  sequentially. Every scratch connection also sets `cache_size` to 2 GB — the
+  2 MB default guarantees a cache miss on every seek at this scale.
+* **Resume from a committed watermark, not a scan.** Scanning for unsettled
+  rows re-skips the settled prefix on every batch (quadratic); walking that
+  prefix again on each restart cost 13 minutes. `watermarks` records the
+  position, `_seed_label_watermark` advances it over settled runs, and
+  `mutation_finite` remains the sole ledger of what is settled.
+* **`caffeinate -i` does not survive a closed lid.** It blocks only *idle*
+  sleep. `run-detached.sh` now uses `caffeinate -s` (system sleep, on AC power);
+  a three-day run accumulated under three hours of CPU before this.
+
+The pipeline is pure standard-library Python, so the job runs on the system's
+native arm64 interpreter rather than the x86_64 venv, which is translated by
+Rosetta at roughly 0.6x. The golden n<=4 ids are identical on both
+interpreters, so there is no re-keying risk; the test suite still runs on the
+venv (pytest is not installed for the system Python).
+
 ```bash
 python scripts/populate.py --count-only --max-vertices 8 --bound 2      # sizes first
 # small cells, all classes explored where |b|<=2:
@@ -109,6 +138,6 @@ python scripts/populate.py --export-d1 dist/d1 --ranks 4 --bound 10 --node-cap 1
 python scripts/populate.py --export-d1 dist/d1 --ranks 5 --bound 3  --node-cap 100 --workers 8
 python scripts/populate.py --export-d1 dist/d1 --ranks 7 --bound 1  --node-cap 100 --workers 8
 python scripts/populate.py --export-d1 dist/d1 --ranks 8 --bound 1  --node-cap 100 --workers 8 --generator sample --sample 1000000
-# rank 6 (42.5 M quivers) is the streaming job: see qmd/bigcell.py
+scripts/run-rank6.sh          # rank 6 (42.5 M quivers): the streaming job, resumable
 scripts/release-data.sh dist/d1                                          # migrations → data → nicknames → deploy
 ```

@@ -68,14 +68,19 @@ git history. This file describes the current system.
 python scripts/populate.py --count-only --max-vertices 10 --bound 2   # exact (connected) cell sizes first!
 python scripts/populate.py --export-d1 dist/d1 --ranks 4 --bound 10 --node-cap 100 --workers 8
 python scripts/populate.py --export-d1 dist/d1 --ranks 8 --bound 1 --generator sample --sample 1000000 --node-cap 100 --workers 8
-python -c "from qmd.bigcell import export_big_cell; export_big_cell('dist/d1', n=6, h=2, sample=1_000_000, workers=8)"
+scripts/run-rank6.sh   # rank 6 via qmd/bigcell.py; resumable, detached, native arm64 python
 scripts/import-d1.sh dist/d1 --remote          # parts in order, ranks ascending, right database per part
 ```
 
 The agreed cells and the cost model are in docs/PHASE3.md §1/§3. Seeds
 with an entry |b_ij| ≥ 3 are marked mutation-infinite without exploration;
 rank 6 runs through the streaming pipeline (`qmd/bigcell.py`, scratch
-SQLite, resumable stages) with class rows only for a sample.
+SQLite, resumable stages) with class rows only for a sample. **In that
+pipeline, never update the big scratch table row by row** — a scattered
+`WHERE id = ?` costs one random page read per row and stalls the job for
+weeks; stage verdicts in a side table and fold them in one id-ordered pass,
+and resume from a committed watermark rather than scanning for unfinished
+rows (docs/PHASE3.md).
 
 Seeds come from `qmd/census.py`: **orderly generation** (exact census of the
 cell (n, bound); parallel) or **sampling** for cells that are not finite jobs

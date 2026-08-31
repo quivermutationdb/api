@@ -200,3 +200,72 @@ def test_bigcell_generate_stage_is_resumable(tmp_path):
     bigcell.stage_generate(con, 4, 2, 2, logs.append)
     assert logs == ["  generate: done"]
     assert con.execute("SELECT count(*) FROM quivers").fetchone()[0] == expected
+
+
+def test_bigcell_label_stage_is_resumable_and_stages_verdicts(tmp_path):
+    """
+    The label stage must survive a kill without recomputing what it settled,
+    and must never write verdicts into `quivers` row by row.
+
+    Scattered `UPDATE quivers ... WHERE id = ?` against a multi-GB table costs
+    one random page read per row and stalled the rank-6 run; verdicts are
+    staged in `label_verdicts` and folded in one id-ordered pass instead.
+    """
+    from qmd import bigcell
+    path = str(tmp_path / "work.sqlite")
+    con = bigcell._db(path)
+    logs = []
+    bigcell.stage_generate(con, 4, 2, 2, logs.append)
+    bigcell.stage_invariants(con, path, 4, 2, logs.append)
+
+    bigcell.stage_label(con, path, 4, cap=20, workers=2, log=logs.append)
+    full = dict(con.execute("SELECT id, mutation_finite FROM quivers").fetchall())
+    assert bigcell._stage_done(con, "label")
+    # Every verdict was drained out of the staging table.
+    assert con.execute("SELECT count(*) FROM label_verdicts").fetchone()[0] == 0
+    # Rank 4 at bound 2 is settled either way for every quiver.
+    assert all(v is not None for v in full.values())
+
+    # Simulate a kill: drop the stage marker and the watermark, and unsettle the
+    # tail half of the table (as if those rows had never been reached).
+    ids = sorted(full)
+    tail = ids[len(ids) // 2:]
+    con.execute("DELETE FROM stages WHERE name = 'label'")
+    con.execute("DELETE FROM watermarks")
+    con.executemany("UPDATE quivers SET mutation_finite = NULL, label_done = 0 WHERE id = ?",
+                    [(q,) for q in tail])
+    con.commit()
+
+    logs.clear()
+    bigcell.stage_label(con, path, 4, cap=20, workers=2, log=logs.append)
+    assert dict(con.execute("SELECT id, mutation_finite FROM quivers").fetchall()) == full
+    # The settled prefix was skipped via the watermark, not re-explored.
+    assert any("skipped" in l and "settled" in l for l in logs), logs
+    assert con.execute("SELECT count(*) FROM label_verdicts").fetchone()[0] == 0
+
+    # A finished stage is a no-op.
+    logs.clear()
+    bigcell.stage_label(con, path, 4, cap=20, workers=2, log=logs.append)
+    assert logs == ["  label: done"]
+
+
+def test_bigcell_watermark_only_advances_over_settled_runs(tmp_path):
+    """
+    The watermark is the resume point, so it must never move past a quiver that
+    still needs work — including one left unsettled in the middle of the prefix.
+    """
+    from qmd import bigcell
+    path = str(tmp_path / "work.sqlite")
+    con = bigcell._db(path)
+    logs = []
+    bigcell.stage_generate(con, 4, 2, 2, logs.append)
+    bigcell.stage_invariants(con, path, 4, 2, logs.append)
+    con.execute("UPDATE quivers SET mutation_finite = 0, label_done = 1")
+    ids = [r[0] for r in con.execute("SELECT id FROM quivers ORDER BY id").fetchall()]
+    hole = ids[len(ids) // 3]
+    con.execute("UPDATE quivers SET mutation_finite = NULL, label_done = 0 WHERE id = ?", (hole,))
+    con.commit()
+
+    stop = bigcell._seed_label_watermark(con, path, logs.append)
+    assert stop < hole, (stop, hole)
+    assert bigcell._watermark(con, "label") == stop
