@@ -17,6 +17,7 @@ mkdir -p "$(dirname "$LOG")"
 exec /usr/bin/python3 -c '
 import os, sys
 log, cmd = sys.argv[1], ["caffeinate", "-s", *sys.argv[2:]]
+os.environ["PYTHONUNBUFFERED"] = "1"   # stdout is a file here, so it would block-buffer
 if os.fork():                      # parent: report and return to the shell
     sys.exit(0)
 os.setsid()                        # child: new session, no controlling terminal

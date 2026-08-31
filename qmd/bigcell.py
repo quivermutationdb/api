@@ -73,6 +73,15 @@ CREATE TABLE IF NOT EXISTS parents_done (idx INTEGER PRIMARY KEY);
 """
 
 
+def _log(*args) -> None:
+    """Default progress sink. `flush` is not optional: run-detached.sh sends
+    stdout to a file, so Python block-buffers it, and a stage that prints a line
+    every few minutes had its progress sitting in an unflushed buffer — lost on
+    every kill. That is why the first rank-6 label run looked like it had
+    produced nothing when it had in fact settled ~2.9 M quivers."""
+    print(*args, flush=True)
+
+
 def _db(path: str) -> sqlite3.Connection:
     """One connection per thread: the pool feeds task generators from its own
     thread, so generators open their own reader connection (WAL mode)."""
@@ -524,7 +533,7 @@ def stage_export(con, out_dir: str, n: int, h: int, class_rows: dict, node_cap: 
 def export_big_cell(out_dir: str, *, n: int, h: int, label_cap: int = 20, node_cap: int = 100,
                     sample: int = 1_000_000, sample_seed: int = 0, workers: int = 8,
                     la_timeout: Optional[float] = 1.0, part_bytes: int = DEFAULT_PART_BYTES,
-                    log=print) -> None:
+                    log=_log) -> None:
     os.makedirs(out_dir, exist_ok=True)
     path = os.path.join(out_dir, f"work-n{n}.sqlite")
     con = _db(path)
