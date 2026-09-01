@@ -746,14 +746,36 @@ def run_generation(max_vertices: int = 4, bound: int = 2,
 
     if workers > 1 and len(seeds) > 1:
         import multiprocessing as mp
-        jobs = [(seed, bound, node_cap) for seed in seeds]
+        # Batched, so that orbits already found spare later seeds their BFS.
+        # One exploration covers every quiver it reaches — at rank 7 that is
+        # ~15 other seeds — and the pool must not simply run all of them: the
+        # first version mapped over every seed and let keep() throw the
+        # duplicates away AFTER the work, which measured 31 hours for a cell
+        # the skip does in a few.
+        #
+        # Determinism is preserved, and that is the whole reason for the
+        # replay: each batch is walked in SEED ORDER and keep() still makes the
+        # final call, so the set of kept orbits is bit-identical to the
+        # sequential loop below. Only the wasted work differs.
+        step = max(1, len(seeds) // 20)
+        batch_size = 4096
+        done = 0
         with mp.get_context("fork").Pool(workers) as pool:
-            # Ordered imap: the parent sees results in seed order, exactly as
-            # the sequential loop would, so the keep/skip decisions match.
-            for i, (seed_qid, orbit) in enumerate(pool.imap(_bfs_one, jobs, chunksize=32), 1):
-                keep(seed_qid, orbit)
-                if progress and (i % max(1, len(jobs) // 20) == 0 or i == len(jobs)):
-                    progress("bfs", i, len(jobs))
+            for start in range(0, len(seeds), batch_size):
+                batch = seeds[start:start + batch_size]
+                ids = [quiver_id(s) for s in batch]
+                jobs = [(s, bound, node_cap) for s, qid in zip(batch, ids)
+                        if qid not in covered_qids]
+                got: dict[str, _RawOrbit] = {}
+                for seed_qid, orbit in pool.imap_unordered(_bfs_one, jobs, chunksize=16):
+                    got[seed_qid] = orbit
+                for qid in ids:
+                    orbit = got.get(qid)
+                    if orbit is not None:
+                        keep(qid, orbit)
+                done += len(batch)
+                if progress and (done // step > (done - len(batch)) // step or done == len(seeds)):
+                    progress("bfs", done, len(seeds))
     else:
         for seed in seeds:
             seed_qid = quiver_id(seed)

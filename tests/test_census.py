@@ -324,3 +324,62 @@ def test_bigcell_resolves_unknowns_and_stores_every_finite_class(tmp_path):
         assert con.execute(
             "SELECT count(*) FROM quivers WHERE mutation_class_id = ? AND mutation_finite = 1",
             (mc_id,)).fetchone()[0] > 0, f"{name} members not flagged finite"
+
+
+def test_quiver_rows_are_the_cell_plus_the_finite_classes():
+    """
+    Exploration runs at EXPLORE_BOUND = 2, so a cell taken at a lower bound
+    (ranks 7 and 8 use |b_ij| <= 1) sends the BFS into weight-2 quivers that
+    are not in the cell. Storing those makes the rank "the cell plus whatever a
+    node-capped search reached" — arbitrary, and at rank 7 it measured tens of
+    millions of rows against a 2.1 M cell.
+
+    Keep the cell, plus the members of completely explored classes (stored
+    complete on purpose; some genuinely carry double arrows).
+    """
+    from qmd import census, d1_export
+    from qmd.core import run_generation, max_edge
+    from qmd.encoding import decode_upper
+
+    seeds = census.census_seeds(4, 1, connected_only=True)
+    result = run_generation(max_vertices=4, bound=2, ranks=[4], node_cap=100,
+                            seeds=seeds, workers=1)
+    rows = d1_export.build_rank_rows(result, 4, bound=1, node_cap=100, la_timeout=0)
+
+    complete = {mc_id for mc_id, mc in rows["classes"].items()
+                if mc.exploration == "complete"}
+    members = {qid for mc_id in complete for qid in rows["classes"][mc_id].quiver_ids}
+
+    assert rows["quivers"], "no quiver rows at all"
+    escaped = 0
+    for r in rows["quivers"]:
+        m = decode_upper(4, r["exchange_matrix"])
+        if max_edge(m) > 1:
+            escaped += 1
+            assert r["id"] in members, \
+                f"{r['id']} has max_edge {max_edge(m)} > cell bound 1 and is not in a complete class"
+    # The exploration really does leave the cell, so this is a live guarantee.
+    assert escaped > 0, "expected some finite-class members outside the (4,1) cell"
+
+
+def test_parallel_bfs_matches_the_sequential_loop_exactly():
+    """
+    The parallel path skips seeds an earlier orbit already covered. It must
+    still produce exactly what the sequential loop produces — the batch is
+    replayed in seed order and keep() makes the final call — because ids are
+    frozen and any divergence re-keys the database.
+    """
+    from qmd import census
+    from qmd.core import run_generation
+
+    seeds = census.census_seeds(4, 2, connected_only=True)
+    one = run_generation(max_vertices=4, bound=2, ranks=[4], node_cap=100,
+                         seeds=seeds, workers=1)
+    many = run_generation(max_vertices=4, bound=2, ranks=[4], node_cap=100,
+                          seeds=seeds, workers=4)
+    assert set(one.quivers) == set(many.quivers)
+    assert set(one.classes) == set(many.classes)
+    assert one.membership == many.membership
+    for mc_id, mc in one.classes.items():
+        assert mc.distinct_quiver_count == many.classes[mc_id].distinct_quiver_count
+        assert mc.labeled_size == many.classes[mc_id].labeled_size

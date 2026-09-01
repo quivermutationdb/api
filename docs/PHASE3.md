@@ -216,6 +216,28 @@ ones from `data/seeds.json`. Exploration runs at `EXPLORE_BOUND = 2`, so each
 seed drags its whole class in, double arrows and all — which is why
 `quiver_count` exceeds the cell size at these ranks.
 
+**A rank's quiver rows are the cell plus the finite classes.** Exploration
+always runs at `EXPLORE_BOUND = 2`, so a cell taken at a lower bound — ranks 7
+and 8 use `|b_ij| <= 1` — sends the BFS into weight-2 quivers outside the cell.
+Storing those makes the rank "the cell plus whatever a node-capped search
+happened to reach": arbitrary, sampling-dependent, and measured at rank 7 as
+~99 new quivers per seed against a 2.12 M cell, i.e. tens of millions of rows.
+`build_rank_rows` therefore keeps a quiver row only if it is in the cell **or**
+belongs to a completely explored class. The finite classes are the deliberate
+exception — they are stored complete on purpose and some members genuinely
+carry double arrows (one of X7's two does). For every cell whose bound is
+already >= 2 (ranks 1-6) the filter keeps everything, so those ranks are
+unchanged.
+
+**The parallel BFS must skip seeds an earlier orbit already covered.** The
+first version mapped `_bfs_one` over every seed and let `keep()` discard the
+duplicates *after* the work; at rank 7 that measured 678 ms per seed over
+2.12 M seeds — **31 hours** — while one exploration covers ~15 other seeds.
+`run_generation` now walks the seeds in batches, submitting only the uncovered
+ones, and replays each batch **in seed order** so `keep()` still makes the
+final call: the kept set is bit-identical to the sequential loop, which matters
+because the ids are frozen. A test asserts the two paths agree.
+
 **Exceptional classes can be found by extension.** Mutation-finiteness is
 hereditary for full subquivers, so every rank-n mutation-finite quiver restricts
 to a mutation-finite one on any n-1 of its vertices; conversely an exceptional

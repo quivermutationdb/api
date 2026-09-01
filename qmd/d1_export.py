@@ -199,7 +199,28 @@ def build_rank_rows(result: GenerationResult, n: int,
     """
     classes = {mc_id: mc for mc_id, mc in result.classes.items()
                if len(mc.canonical_rep) == n}
-    quivers = {qid: m for qid, m in result.quivers.items() if len(m) == n}
+
+    # Quiver rows are the CELL, plus every member of a completely explored
+    # (mutation-finite) class.
+    #
+    # Exploration always runs at EXPLORE_BOUND = 2, so when the cell bound is
+    # lower — ranks 7 and 8 are taken at |b_ij| <= 1 — a capped BFS wanders
+    # into weight-2 quivers that are not in the cell. Storing those would make
+    # the rank "the cell plus whatever a node-capped search happened to reach",
+    # which is arbitrary, sampling-dependent, and at rank 7 measured tens of
+    # millions of rows against a 2.1 M cell.
+    #
+    # The finite classes are the deliberate exception: they are the
+    # mathematically interesting ones, they are stored complete on purpose, and
+    # some of their members genuinely carry double arrows (X7 has one such of
+    # its two). Keeping them costs a few hundred rows.
+    #
+    # For every cell whose bound is already >= EXPLORE_BOUND (ranks 1-6) this
+    # filter keeps everything, so those ranks are byte-identical.
+    complete_members = {qid for mc in classes.values()
+                        if mc.exploration == "complete" for qid in mc.quiver_ids}
+    quivers = {qid: m for qid, m in result.quivers.items()
+               if len(m) == n and (max_edge(m) <= bound or qid in complete_members)}
     extra = dict(extra_quivers or {})
     for qid in list(extra):
         if qid in quivers:
@@ -676,8 +697,15 @@ def export_ranks(out_dir: str, *, max_vertices: int, bound: int,
         if skipped:
             log(f"    {len(skipped)} seeds have |b_ij| >= 3: mutation-infinite by Derksen–Owen, not explored")
 
+        # Log on each 10% crossing rather than on exact multiples: the BFS
+        # phase now reports once per batch, so `i` lands on multiples of the
+        # batch size and an equality test would silence the stage completely.
+        seen_pct: dict[str, int] = {}
+
         def prog(stage, i, total):
-            if i == total or i % max(1, total // 10) == 0:
+            pct = i * 10 // max(1, total)
+            if i == total or pct > seen_pct.get(stage, -1):
+                seen_pct[stage] = pct
                 log(f"    {stage}: {i}/{total}")
         # Rank <= 2 never changes weights under mutation, so a rank-2 seed with a
         # large entry is explored at its own weight (Derksen–Owen needs rank >= 3).

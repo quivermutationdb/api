@@ -47,6 +47,12 @@ git history. This file describes the current system.
   query every shard of the rank and merge (`src/api/merge.ts`); a class and
   its labelings live in the class id's shard; `scripts/migrate-all.sh`
   migrates every shard; `scripts/import-d1.sh` routes parts by manifest.
+- **A rank's quiver rows are the cell plus the mutation-finite classes.**
+  Exploration always runs at `EXPLORE_BOUND = 2`, so a cell taken at a lower
+  bound (ranks 7-8 use `|b_ij| <= 1`) reaches weight-2 quivers outside it;
+  `build_rank_rows` drops those unless they belong to a completely explored
+  class. Never store the overflow — at rank 7 it is tens of millions of
+  arbitrary rows against a 2.12 M cell (docs/PHASE3.md).
 - **The census is of connected quivers only.** Class discovery is an
   *unlabeled* BFS (`qmd/core._bfs_unlabeled`, canonicalise every mutation
   result); the exploration bound is the constant `EXPLORE_BOUND = 2` (the
