@@ -43,7 +43,8 @@ import random
 from typing import Iterator, Optional
 
 from qmd.core import (
-    Matrix, _bfs_unlabeled, _lex_key, is_connected, mutation_class_id, to_matrix,
+    Matrix, _bfs_unlabeled, _lex_key, canonical_form, is_connected,
+    mutation_class_id, to_matrix,
 )
 
 # n = 6g + 3b + 3p + c - 6, with c = total marked points on the boundary.
@@ -390,3 +391,24 @@ def classify(canonical_rep: Matrix, mc_id: Optional[str] = None) -> Optional[str
             return None
         mc_id = mutation_class_id(min(orbit.members, key=_lex_key))
     return table.get(mc_id)
+
+
+def seed_quivers(rank: int) -> list:
+    """
+    One canonical seed per surface class of this rank, for the generator.
+
+    A census cell is bounded (rank 7 and 8 are taken at |b_ij| <= 1), so a
+    mutation-finite class whose every member carries a double arrow would never
+    be seeded and would vanish from the dataset. Feeding the surface quivers in
+    as curated seeds removes that whole failure mode: every surface class is
+    present because it was constructed, not because the cell happened to
+    contain it.
+    """
+    out = []
+    if rank < 3 or rank > SURFACE_MAX_RANK:
+        return out
+    for _sig, (t, matching) in sorted(triangulations_for(rank).items()):
+        q = quiver_of(t, matching)
+        if q is not None:
+            out.append(canonical_form(q))
+    return out

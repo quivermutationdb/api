@@ -570,11 +570,25 @@ def _seeds_for(n: int, bound: int, generator: str, sample: Optional[int],
 
 
 def _curated_seeds(n: int, log) -> list:
-    """Extra seeds from data/seeds.json (e.g. E8), canonicalised; skipped if absent."""
-    from qmd.core import canonical_form, to_matrix
+    """
+    Seeds that must be in the dataset whatever the cell contains.
+
+    Two sources. The curated ones in data/seeds.json, and — more importantly —
+    constructed ones: every finite Dynkin type of the rank, the affine E types,
+    and one quiver per triangulated surface.
+
+    A bounded cell cannot be trusted to contain the mutation-finite classes. At
+    |b_ij| <= 1 (ranks 7 and 8) a class whose every member carries a double
+    arrow would never be seeded, and where the cell is sampled rather than
+    enumerated even a class that *is* in it is a one-in-a-million target — that
+    is exactly how rank 6 lost ten of its thirteen finite classes. Seeding each
+    one explicitly makes their presence a construction rather than a
+    coincidence, and because generation explores at EXPLORE_BOUND = 2 the whole
+    class comes along, double arrows and all.
+    """
+    from qmd.core import canonical_form, is_connected, to_matrix
     path = os.path.join(os.path.dirname(__file__), "..", "data", "seeds.json")
     doc = _load_json(path) or {}
-    from qmd.core import is_connected
     out = []
     for e in doc.get("seeds", []):
         m = to_matrix(e["matrix"])
@@ -583,8 +597,18 @@ def _curated_seeds(n: int, log) -> list:
         if not is_connected(m):
             raise SystemExit(f"data/seeds.json: {e.get('name', '?')} is disconnected; the census is connected-only")
         out.append(canonical_form(m))
+    curated = len(out)
+
+    built = dict(dynkin._seeds_of_rank(n))
+    built.update(dynkin.extended_seeds_of_rank(n))
+    out.extend(canonical_form(m) for m in built.values() if is_connected(m))
+    surface_seeds = surfaces.seed_quivers(n)
+    out.extend(surface_seeds)
+    out = sorted(set(out))
     if out:
-        log(f"    {len(out)} curated seed(s) from data/seeds.json")
+        log(f"    {len(out)} curated seed(s): {curated} from data/seeds.json, "
+            f"{len(built)} Dynkin/affine ({', '.join(sorted(built))}), "
+            f"{len(surface_seeds)} surface")
     return out
 
 

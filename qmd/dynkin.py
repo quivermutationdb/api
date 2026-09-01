@@ -168,3 +168,30 @@ def classify(canonical_rep: Matrix, mc_id: Optional[str] = None) -> Optional[str
     if not names:
         return None
     return " + ".join(sorted(names))
+
+
+def _star(a: int, b: int, c: int) -> Matrix:
+    """Star-shaped tree: a centre with three arms of a, b and c edges."""
+    n = a + b + c + 1
+    rows = [[0] * n for _ in range(n)]
+    nxt = 1
+    for arm in (a, b, c):
+        prev = 0
+        for _ in range(arm):
+            rows[prev][nxt], rows[nxt][prev] = 1, -1
+            prev, nxt = nxt, nxt + 1
+    return to_matrix(rows)
+
+
+# Extended (affine) Dynkin diagrams as star-shaped trees; A~ and D~ are omitted
+# because they are the annuli and twice-punctured polygons, which qmd.surfaces
+# already generates.
+_EXTENDED = {7: ("E6~", (2, 2, 2)), 8: ("E7~", (3, 3, 1)), 9: ("E8~", (5, 2, 1))}
+
+
+def extended_seeds_of_rank(k: int) -> dict:
+    """Affine E seeds of exactly this rank: {name: Matrix}."""
+    if k not in _EXTENDED:
+        return {}
+    name, arms = _EXTENDED[k]
+    return {name: _star(*arms)}

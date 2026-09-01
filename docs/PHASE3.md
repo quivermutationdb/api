@@ -203,6 +203,30 @@ absent from the surface table is required, not incidental: Derksen–Owen proved
 it is not block decomposable, and a surface landing on it would mean the module
 is wrong. The test suite asserts exactly that.
 
+### Seeding the finite classes instead of hoping for them
+
+A census cell is bounded, and ranks 7 and 8 are taken at `|b_ij| <= 1`. A
+mutation-finite class whose every member carries a double arrow could therefore
+never be seeded, and rank 8 is sampled besides, where even a class that *is* in
+the cell is a one-in-a-million target. `_curated_seeds` closes both holes by
+constructing the seeds: every Dynkin and affine-E type of the rank
+(`dynkin._seeds_of_rank`, `dynkin.extended_seeds_of_rank`), one quiver per
+triangulated surface (`surfaces.seed_quivers`), and the genuinely exceptional
+ones from `data/seeds.json`. Exploration runs at `EXPLORE_BOUND = 2`, so each
+seed drags its whole class in, double arrows and all — which is why
+`quiver_count` exceeds the cell size at these ranks.
+
+**Exceptional classes can be found by extension.** Mutation-finiteness is
+hereditary for full subquivers, so every rank-n mutation-finite quiver restricts
+to a mutation-finite one on any n-1 of its vertices; conversely an exceptional
+class can be hunted by adding a vertex to the rank below. Derksen–Owen note X6
+is a subquiver of X7, and of the 35,344 connected one-vertex extensions of X6's
+five members exactly **one** mutation-finite class appears —
+`MC.n7.9c0c001292e85304`, with 2 quivers and arrow counts {12, 15}, matching
+Du–Li–Pan Thm 3.17 for X7 exactly. Its two members are one simple quiver and
+one with three double arrows, so the exhaustive (7,1) cell finds it anyway; it
+is in `data/seeds.json` regardless, along with X6, so neither depends on luck.
+
 The pipeline is pure standard-library Python, so the job runs on the system's
 native arm64 interpreter rather than the x86_64 venv, which is translated by
 Rosetta at roughly 0.6x. The golden n<=4 ids are identical on both
