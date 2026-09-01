@@ -5,10 +5,374 @@
       "mc_id": "MC.n3.7405511b230b7552",
       "nickname": "Markov",
       "slug": "markov",
-      "matrix": [[0, 2, -2], [-2, 0, 2], [2, -2, 0]],
+      "matrix": [
+        [
+          0,
+          2,
+          -2
+        ],
+        [
+          -2,
+          0,
+          2
+        ],
+        [
+          2,
+          -2,
+          0
+        ]
+      ],
       "note": "The Markov quiver: an oriented 3-cycle with every arrow doubled. Its mutation class is a single quiver up to relabeling, and it is the smallest quiver that is not mutation-acyclic.",
       "added_by": "Blake Jackson",
       "added_at": "2026-08-27"
+    },
+    {
+      "mc_id": "MC.n6.28d1d4164324e327",
+      "nickname": "Ã(1,5)",
+      "slug": "affine-a-1-5",
+      "matrix": [
+        [
+          0,
+          -2,
+          0,
+          0,
+          0,
+          1
+        ],
+        [
+          2,
+          0,
+          0,
+          0,
+          0,
+          -1
+        ],
+        [
+          0,
+          0,
+          0,
+          -1,
+          -1,
+          0
+        ],
+        [
+          0,
+          0,
+          1,
+          0,
+          0,
+          -1
+        ],
+        [
+          0,
+          0,
+          1,
+          0,
+          0,
+          0
+        ],
+        [
+          -1,
+          1,
+          0,
+          1,
+          0,
+          0
+        ]
+      ],
+      "note": "Affine type Ã(1,5): the extended Dynkin diagram Ã5, realised as a 6-cycle with one arrow running against the other five. Equivalently the annulus with 1 marked point on one boundary component and 5 on the other. Mutation-acyclic; 42 quivers.",
+      "added_by": "Blake Jackson",
+      "added_at": "2026-09-01"
+    },
+    {
+      "mc_id": "MC.n6.114aa9334ddab0b4",
+      "nickname": "Ã(2,4)",
+      "slug": "affine-a-2-4",
+      "matrix": [
+        [
+          0,
+          -2,
+          0,
+          0,
+          1,
+          1
+        ],
+        [
+          2,
+          0,
+          0,
+          0,
+          -1,
+          -1
+        ],
+        [
+          0,
+          0,
+          0,
+          -1,
+          -1,
+          0
+        ],
+        [
+          0,
+          0,
+          1,
+          0,
+          0,
+          0
+        ],
+        [
+          -1,
+          1,
+          1,
+          0,
+          0,
+          0
+        ],
+        [
+          -1,
+          1,
+          0,
+          0,
+          0,
+          0
+        ]
+      ],
+      "note": "Affine type Ã(2,4): a 6-cycle with two arrows running against the other four, i.e. the annulus with 2 and 4 marked points on its boundary components. Mutation-acyclic; 36 quivers.",
+      "added_by": "Blake Jackson",
+      "added_at": "2026-09-01"
+    },
+    {
+      "mc_id": "MC.n6.64b3aad6b780ddba",
+      "nickname": "Ã(3,3)",
+      "slug": "affine-a-3-3",
+      "matrix": [
+        [
+          0,
+          -2,
+          0,
+          0,
+          1,
+          1
+        ],
+        [
+          2,
+          0,
+          0,
+          0,
+          -1,
+          -1
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          -1,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          -1
+        ],
+        [
+          -1,
+          1,
+          1,
+          0,
+          0,
+          0
+        ],
+        [
+          -1,
+          1,
+          0,
+          1,
+          0,
+          0
+        ]
+      ],
+      "note": "Affine type Ã(3,3): the balanced 6-cycle, three arrows each way — the annulus with 3 marked points on each boundary component. The most symmetric of the three rank-6 annulus classes and the smallest, at 22 quivers.",
+      "added_by": "Blake Jackson",
+      "added_at": "2026-09-01"
+    },
+    {
+      "mc_id": "MC.n6.71357003153649ba",
+      "nickname": "D̃5",
+      "slug": "affine-d5",
+      "matrix": [
+        [
+          0,
+          -2,
+          0,
+          1,
+          1,
+          1
+        ],
+        [
+          2,
+          0,
+          0,
+          -1,
+          -1,
+          -1
+        ],
+        [
+          0,
+          0,
+          0,
+          -1,
+          0,
+          0
+        ],
+        [
+          -1,
+          1,
+          1,
+          0,
+          0,
+          0
+        ],
+        [
+          -1,
+          1,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          -1,
+          1,
+          0,
+          0,
+          0,
+          0
+        ]
+      ],
+      "note": "Affine type D̃5: the extended Dynkin diagram, a central edge with two leaves at each end (degree sequence 3,3,1,1,1,1). As a surface it is the twice-punctured triangle. Mutation-acyclic; 40 quivers.",
+      "added_by": "Blake Jackson",
+      "added_at": "2026-09-01"
+    },
+    {
+      "mc_id": "MC.n6.45cb86cc44e98cd3",
+      "nickname": "Four-punctured sphere",
+      "slug": "four-punctured-sphere",
+      "matrix": [
+        [
+          0,
+          -2,
+          1,
+          1,
+          1,
+          1
+        ],
+        [
+          2,
+          0,
+          -1,
+          -1,
+          -1,
+          -1
+        ],
+        [
+          -1,
+          1,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          -1,
+          1,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          -1,
+          1,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          -1,
+          1,
+          0,
+          0,
+          0,
+          0
+        ]
+      ],
+      "note": "The sphere with four punctures: the only closed surface with six arcs. Its mutation class is the smallest of any rank-6 surface type — 4 quivers, with 8, 9, 10 or 12 arrows (Du–Li–Pan, arXiv:2105.11278, Thm 3.17).",
+      "added_by": "Blake Jackson",
+      "added_at": "2026-09-01"
+    },
+    {
+      "mc_id": "MC.n6.03e32ee9eeb2b09e",
+      "nickname": "X6",
+      "slug": "x6",
+      "matrix": [
+        [
+          0,
+          -2,
+          0,
+          0,
+          0,
+          1
+        ],
+        [
+          2,
+          0,
+          0,
+          0,
+          0,
+          -1
+        ],
+        [
+          0,
+          0,
+          0,
+          -2,
+          0,
+          1
+        ],
+        [
+          0,
+          0,
+          2,
+          0,
+          0,
+          -1
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          -1
+        ],
+        [
+          -1,
+          1,
+          -1,
+          1,
+          1,
+          0
+        ]
+      ],
+      "note": "One of the two exceptional quivers found by Derksen and Owen (New Graphs of Finite Mutation Type, Electron. J. Combin. 15 (2008), arXiv:0804.0787). X6 is not block decomposable, so unlike every other mutation-finite rank-6 class it does not come from a triangulated surface. Its mutation class is famously tiny: 5 quivers, with 9 or 11 arrows (Du–Li–Pan, arXiv:2105.11278, Thm 3.17).",
+      "added_by": "Blake Jackson",
+      "added_at": "2026-09-01"
     }
   ]
 }
