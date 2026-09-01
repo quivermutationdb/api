@@ -35,29 +35,42 @@ def main() -> int:
         n = int(n_str)
         if want and n not in want:
             continue
-        con = sqlite3.connect(":memory:")
-        for name in sorted(os.listdir(MIGRATIONS)):
-            if name.endswith(".sql"):
-                con.executescript(open(os.path.join(MIGRATIONS, name), encoding="utf-8").read()
-                                  .replace("--> statement-breakpoint", ""))
+        # A split rank has one part sequence PER SHARD, and each sequence starts
+        # by DELETEing the rank. Loading them all into one database therefore
+        # leaves only the last shard, silently checking a quarter of the data
+        # and reporting a count mismatch. Each shard gets its own database.
+        by_shard: dict = {}
         for part in entry["parts"]:
-            with open(os.path.join(args.dir, part["file"]), encoding="utf-8") as f:
-                con.executescript(f.read())
-        total = con.execute("SELECT count(*) FROM quivers WHERE n=?", (n,)).fetchone()[0]
+            by_shard.setdefault(part.get("shard", "main"), []).append(part)
+        total = 0
         disc = 0
         flag_mismatch = 0
-        for qid, upper, flag in con.execute("SELECT id, exchange_matrix, is_connected FROM quivers WHERE n=?", (n,)):
-            c = is_connected(decode_upper(n, upper))
-            if not c:
-                disc += 1
-            if bool(flag) != c:
-                flag_mismatch += 1
-        lab_disc = sum(1 for (upper,) in con.execute(
-            "SELECT l.matrix FROM labelings l JOIN mutation_classes m ON m.id = l.mutation_class_id WHERE m.n=?", (n,))
-            if not is_connected(decode_upper(n, upper)))
+        lab_disc = 0
+        for shard, shard_parts in sorted(by_shard.items()):
+            con = sqlite3.connect(":memory:")
+            for name in sorted(os.listdir(MIGRATIONS)):
+                if name.endswith(".sql"):
+                    con.executescript(open(os.path.join(MIGRATIONS, name), encoding="utf-8").read()
+                                      .replace("--> statement-breakpoint", ""))
+            for part in shard_parts:
+                with open(os.path.join(args.dir, part["file"]), encoding="utf-8") as f:
+                    con.executescript(f.read())
+            total += con.execute("SELECT count(*) FROM quivers WHERE n=?", (n,)).fetchone()[0]
+            for qid, upper, flag in con.execute(
+                    "SELECT id, exchange_matrix, is_connected FROM quivers WHERE n=?", (n,)):
+                c = is_connected(decode_upper(n, upper))
+                if not c:
+                    disc += 1
+                if bool(flag) != c:
+                    flag_mismatch += 1
+            lab_disc += sum(1 for (upper,) in con.execute(
+                "SELECT l.matrix FROM labelings l JOIN mutation_classes m ON m.id = l.mutation_class_id WHERE m.n=?", (n,))
+                if not is_connected(decode_upper(n, upper)))
+            con.close()
         ok = disc == 0 and flag_mismatch == 0 and lab_disc == 0 and total == entry.get("quiver_count", total)
-        print(f"  rank {n}: {total} quivers, disconnected={disc}, flag mismatches={flag_mismatch}, "
-              f"disconnected labelings={lab_disc}, manifest count={entry.get('quiver_count')} -> {'OK' if ok else 'FAIL'}")
+        print(f"  rank {n}: {total} quivers in {len(by_shard)} shard(s), disconnected={disc}, "
+              f"flag mismatches={flag_mismatch}, disconnected labelings={lab_disc}, "
+              f"manifest count={entry.get('quiver_count')} -> {'OK' if ok else 'FAIL'}")
         if not ok:
             problems += 1
     print("verify-export:", "OK" if problems == 0 else f"{problems} rank(s) FAILED")
