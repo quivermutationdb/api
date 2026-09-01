@@ -15,9 +15,15 @@ stage; each stage is resumable and parallel:
                 (Derksen–Owen), which is written back to every quiver seen —
                 so most quivers get mutation_finite = 0 without a class row;
                 a class that drains proves finite for all its members
+  3b. resolve   re-explore whatever the capped label pass left unknown, at a
+                cap high enough to settle it (a class bigger than the label
+                cap can never drain, so every finite class above it comes back
+                unknown); hundreds of rows, seconds of work
   4. sample     class rows for a uniform sample of K quivers (their full
                 capped explorations, glued, with invariants) via the normal
-                run_generation path
+                run_generation path, PLUS a complete exploration of every
+                mutation-finite class — sampling cannot be trusted to find
+                those (rank 6 has 428 finite quivers out of 42.5 M)
   5. export     per-shard part files straight from the scratch table
 
 The output is the same manifest format as qmd/d1_export.export_ranks.
@@ -422,6 +428,144 @@ def stage_label_apply(con, log, chunk: int = 200_000) -> int:
 
 
 # ---------------------------------------------------------------------------
+# 3b. resolve: settle every quiver the capped label pass left unknown
+# ---------------------------------------------------------------------------
+
+RESOLVE_CAP = 100_000
+
+
+def stage_resolve(con, n: int, cap: int, workers: int, log, chunk: int = 50) -> None:
+    """
+    Re-explore every quiver still marked *unknown*, at a cap high enough to
+    settle it.
+
+    `stage_label` has to run at a small cap because it visits all 42 M rows,
+    and a class larger than that cap can never drain — so every mutation-finite
+    class bigger than the cap comes back unknown. At rank 6 that silently
+    swallowed A6, D6 and E6 (49, 80 and 67 quivers); they were only rescued
+    because the random sample happened to land in all three, a ~3% event.
+
+    The leftovers are few — hundreds, not millions — so a second pass at a cap
+    three orders of magnitude larger costs seconds and leaves nothing
+    undecided. The slowest rank-6 quiver needed 1,089 visits before it crossed
+    the wall, which is why the cap here is not merely "a bit bigger".
+
+    Verdicts go through `label_verdicts` and the same id-ordered apply pass as
+    the label stage; nothing is written to the big table row by row.
+    """
+    if _stage_done(con, "resolve"):
+        return
+    # No ORDER BY: on a TEXT PRIMARY KEY that would walk the implicit index and
+    # seek the table once per row — 42 M random page reads. An unordered scan is
+    # sequential, and the handful of survivors are sorted in Python.
+    pending = sorted(con.execute(
+        "SELECT id, upper FROM quivers WHERE mutation_finite IS NULL").fetchall())
+    log(f"    resolving {len(pending)} unknown quivers (cap {cap}) ...")
+    if pending:
+        import multiprocessing as mp
+        batches = [(i, n, cap, pending[i:i + chunk]) for i in range(0, len(pending), chunk)]
+        settled = 0
+        with mp.get_context("fork").Pool(workers) as pool:
+            for _seq, out in pool.imap_unordered(_label_job, batches):
+                for value, qids in out:
+                    con.executemany("INSERT OR IGNORE INTO label_verdicts VALUES (?, ?)",
+                                    [(q, value) for q in qids])
+                con.commit()
+                settled += 1
+                if settled % 20 == 0:
+                    log(f"    resolved {settled}/{len(batches)} batches")
+        stage_label_apply(con, log)
+    # Record which quivers were still unknown when this stage ran. An export
+    # made before the resolve stage existed shipped exactly these as
+    # mutation_finite NULL, and a supplemental patch needs to know which rows
+    # to correct without re-parsing gigabytes of part files.
+    _mark(con, "resolve", {"settled": [q for q, _u in pending]})
+    counts = con.execute("SELECT mutation_finite, count(*) FROM quivers GROUP BY 1").fetchall()
+    log(f"  resolve: done {dict((k if k is not None else 'unknown', v) for k, v in counts)}")
+
+
+def finite_class_seeds(con, n: int, log) -> list:
+    """
+    One seed per mutation-finite class: every quiver proved finite, deduped by
+    exploring each class once.
+
+    Mutation-finite quivers are vanishingly rare (428 of 42.5 M at rank 6), so
+    this is cheap — and it is the only way to be sure the finite classes are in
+    the dataset. Sampling cannot be trusted to find them: a class of 49 quivers
+    is a 1-in-a-million target.
+    """
+    # Unordered for the same reason as stage_resolve: ORDER BY on the TEXT
+    # primary key turns a sequential scan into one random seek per row.
+    rows = sorted(con.execute(
+        "SELECT id, upper FROM quivers WHERE mutation_finite = 1").fetchall())
+    seen: set[str] = set()
+    seeds = []
+    for qid, upper in rows:
+        if qid in seen:
+            continue
+        m = decode_upper(n, upper)
+        # Proved finite already, so an uncapped walk terminates.
+        seen |= set(_bfs_unlabeled(m, EXPLORE_BOUND, None).qid_set)
+        seeds.append(m)
+    log(f"    {len(seeds)} mutation-finite class(es) over {len(rows)} quivers")
+    return seeds
+
+
+def stage_finite_classes(con, n: int, workers: int, la_timeout, known, log) -> dict:
+    """
+    Complete class rows for every mutation-finite class in the cell.
+
+    These are the mathematically interesting classes (finite type, affine,
+    surface and exceptional), and they are exactly the ones a uniform sample
+    misses. Explored uncapped — finiteness is already proved, so the walk
+    terminates — which makes every one of them `exploration = 'complete'` with
+    its labeled orbit stored where it fits under LABELED_MAX.
+    """
+    seeds = finite_class_seeds(con, n, log)
+    if not seeds:
+        return {"mutation_classes": [], "quivers": [], "classes": {},
+                "acyclicity_by_qid": {}, "rank_stats": {"labeled_quiver_count": 0}}
+
+    def prog(stage, i, tot):
+        if i == tot or i % max(1, tot // 5) == 0:
+            log(f"    finite {stage}: {i}/{tot}")
+
+    result = run_generation(max_vertices=n, bound=EXPLORE_BOUND, ranks=[n], node_cap=None,
+                            seeds=seeds, workers=workers, progress=prog)
+    rows = build_rank_rows(result, n, known_acyclicity=known, bound=2, node_cap=None,
+                           generator="finite", census_size=None, la_timeout=la_timeout,
+                           workers=workers, progress=prog)
+    for q in rows["quivers"]:
+        con.execute("UPDATE quivers SET mutation_class_id=?, labeling_count=?, "
+                    "mutation_finite=coalesce(mutation_finite, ?) WHERE id=?",
+                    (q["mutation_class_id"], q["labeling_count"], q["mutation_finite"], q["id"]))
+    con.commit()
+    log(f"    {len(rows['mutation_classes'])} finite class row(s)")
+    return rows
+
+
+def _merge_class_rows(a: dict, b: dict) -> dict:
+    """
+    Union two build_rank_rows outputs; `b` wins an id collision.
+
+    Only the class-side keys are merged. Quiver rows are not: stage_export
+    reads those straight from the scratch table, which both stages have
+    already written their membership back to.
+    """
+    by_id = {r["id"]: r for r in a["mutation_classes"]}
+    by_id.update({r["id"]: r for r in b["mutation_classes"]})
+    classes = {**a["classes"], **b["classes"]}
+    return {
+        "mutation_classes": sorted(by_id.values(), key=lambda r: r["id"]),
+        "quivers": a["quivers"],
+        "classes": classes,
+        "acyclicity_by_qid": {**a["acyclicity_by_qid"], **b["acyclicity_by_qid"]},
+        "rank_stats": {"labeled_quiver_count":
+                       sum((c.labeled_size or 0) for c in classes.values())},
+    }
+
+
+# ---------------------------------------------------------------------------
 # 4. sample: class rows for K quivers via the normal pipeline
 # ---------------------------------------------------------------------------
 
@@ -531,6 +675,7 @@ def stage_export(con, out_dir: str, n: int, h: int, class_rows: dict, node_cap: 
 # ---------------------------------------------------------------------------
 
 def export_big_cell(out_dir: str, *, n: int, h: int, label_cap: int = 20, node_cap: int = 100,
+                    resolve_cap: int = RESOLVE_CAP,
                     sample: int = 1_000_000, sample_seed: int = 0, workers: int = 8,
                     la_timeout: Optional[float] = 1.0, part_bytes: int = DEFAULT_PART_BYTES,
                     log=_log) -> None:
@@ -541,6 +686,7 @@ def export_big_cell(out_dir: str, *, n: int, h: int, label_cap: int = 20, node_c
     stage_generate(con, n, h, workers, log)
     stage_invariants(con, path, n, workers, log)
     stage_label(con, path, n, label_cap, workers, log)
+    stage_resolve(con, n, resolve_cap, workers, log)
 
     known: dict = {}
     for j in range(1, n):
@@ -549,6 +695,10 @@ def export_big_cell(out_dir: str, *, n: int, h: int, label_cap: int = 20, node_c
             raise SystemExit(f"rank {n} needs acyclicity-n{j}.json — export the lower ranks first")
         known.update(ck)
     class_rows = stage_sample(con, n, sample, node_cap, workers, sample_seed, la_timeout, known, log)
+    # Sampling cannot be relied on to find the mutation-finite classes, so they
+    # are explored explicitly and merged in.
+    class_rows = _merge_class_rows(
+        class_rows, stage_finite_classes(con, n, workers, la_timeout, known, log))
     parts = stage_export(con, out_dir, n, h, class_rows, node_cap, sample, part_bytes, log)
     _atomic_write(os.path.join(out_dir, f"acyclicity-n{n}.json"),
                   json.dumps(class_rows["acyclicity_by_qid"], sort_keys=True))
@@ -563,7 +713,8 @@ def export_big_cell(out_dir: str, *, n: int, h: int, label_cap: int = 20, node_c
     manifest["ranks"][str(n)] = {
         "parts": parts,
         "depends_on": {f"acyclicity-n{j}.json": _sha256_file(os.path.join(out_dir, f"acyclicity-n{j}.json")) for j in range(1, n)},
-        "settings": {"bound": h, "node_cap": node_cap, "label_cap": label_cap, "generator": "bigcell",
+        "settings": {"bound": h, "node_cap": node_cap, "label_cap": label_cap,
+                     "resolve_cap": resolve_cap, "generator": "bigcell",
                      "sample": sample, "la_timeout": la_timeout, "schema": 3},
         "quiver_count": con.execute("SELECT count(*) FROM quivers").fetchone()[0],
         "class_count": len(class_rows["mutation_classes"]),

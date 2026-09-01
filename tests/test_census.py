@@ -280,3 +280,47 @@ def test_bigcell_watermark_only_advances_over_settled_runs(tmp_path):
     stop = bigcell._seed_label_watermark(con, path, logs.append)
     assert stop < hole, (stop, hole)
     assert bigcell._watermark(con, "label") == stop
+
+
+def test_bigcell_resolves_unknowns_and_stores_every_finite_class(tmp_path):
+    """
+    A mutation-finite class larger than the label cap can never drain, so the
+    capped label pass returns *unknown* for every one of its members — and a
+    uniform sample is far too thin to rescue them. Rank 6 shipped A6/D6/E6 only
+    because the sample happened to land in all three (a ~3% event) and shipped
+    ten other finite classes not at all.
+
+    Pin both halves of the fix: nothing is left unknown, and every finite class
+    gets a complete row with its labelings.
+    """
+    import json, os, sqlite3
+    from qmd import bigcell, d1_export, dynkin
+    logs = []
+    d1_export.export_ranks(str(tmp_path), max_vertices=3, bound=2, log=logs.append)
+    # label_cap=2 is far too small for any finite rank-4 class to drain, and
+    # sample=1 means the sample is essentially certain not to find one either.
+    bigcell.export_big_cell(str(tmp_path), n=4, h=2, label_cap=2, node_cap=100,
+                            sample=1, workers=2, la_timeout=0, log=logs.append)
+
+    con = sqlite3.connect(":memory:")
+    drizzle = os.path.join(os.path.dirname(__file__), "..", "drizzle")
+    for name in sorted(os.listdir(drizzle)):
+        if name.endswith(".sql"):
+            con.executescript(open(os.path.join(drizzle, name)).read()
+                              .replace("--> statement-breakpoint", ""))
+    manifest = json.load(open(os.path.join(str(tmp_path), "manifest.json")))
+    for part in manifest["ranks"]["4"]["parts"]:
+        con.executescript(open(os.path.join(str(tmp_path), part["file"])).read())
+
+    assert con.execute(
+        "SELECT count(*) FROM quivers WHERE mutation_finite IS NULL").fetchone()[0] == 0
+
+    stored = dict(con.execute("SELECT id, exploration FROM mutation_classes").fetchall())
+    for mc_id, name in dynkin.reference_for(4).items():
+        assert mc_id in stored, f"finite class {name} ({mc_id}) has no row"
+        assert stored[mc_id] == "complete", f"{name} stored as {stored[mc_id]!r}"
+        assert con.execute("SELECT count(*) FROM labelings WHERE mutation_class_id = ?",
+                           (mc_id,)).fetchone()[0] > 0, f"{name} has no labelings"
+        assert con.execute(
+            "SELECT count(*) FROM quivers WHERE mutation_class_id = ? AND mutation_finite = 1",
+            (mc_id,)).fetchone()[0] > 0, f"{name} members not flagged finite"

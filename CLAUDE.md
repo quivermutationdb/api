@@ -35,7 +35,7 @@ git history. This file describes the current system.
   curated `class_nicknames`; ingest-time aggregates + provenance in
   `rank_stats` (+ per-shard counts); `downloads` logs exports.
 - **Sharding** (`data/shards.json`, `src/db/shard.ts`): one main database +
-  per-rank split databases (rank 6: `qmd-n6-0/1` by id-hash bucket). Lists
+  per-rank split databases (rank 6: `qmd-n6-0/1/2/3` by id-hash bucket). Lists
   query every shard of the rank and merge (`src/api/merge.ts`); a class and
   its labelings live in the class id's shard; `scripts/migrate-all.sh`
   migrates every shard; `scripts/import-d1.sh` routes parts by manifest.
@@ -81,6 +81,17 @@ pipeline, never update the big scratch table row by row** — a scattered
 weeks; stage verdicts in a side table and fold them in one id-ordered pass,
 and resume from a committed watermark rather than scanning for unfinished
 rows (docs/PHASE3.md).
+
+**The capped label pass cannot decide a class bigger than its cap**, so every
+mutation-finite class above it comes back *unknown* — and a uniform sample
+will not rescue them (a 49-quiver class in a 42.5 M cell is a 1-in-a-million
+target; rank 6 caught A6/D6/E6 by luck and missed ten other finite classes
+entirely). Always follow the label pass with `stage_resolve` (re-explore the
+leftovers at a cap ~1000×, which costs seconds) and explore the
+mutation-finite classes explicitly with `stage_finite_classes` rather than
+hoping the sample finds them. Mutation-finite quivers are rare — 428 of
+42.5 M at rank 6, in 13 classes — and they are the mathematically
+interesting ones, so they must never be left to chance.
 
 Seeds come from `qmd/census.py`: **orderly generation** (exact census of the
 cell (n, bound); parallel) or **sampling** for cells that are not finite jobs

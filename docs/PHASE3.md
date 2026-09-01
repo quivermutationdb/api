@@ -124,6 +124,41 @@ days; `scripts/run-rank6.sh` encodes all three.
 * **`caffeinate -i` does not survive a closed lid.** It blocks only *idle*
   sleep. `run-detached.sh` now uses `caffeinate -s` (system sleep, on AC power);
   a three-day run accumulated under three hours of CPU before this.
+* **`ORDER BY id` on a TEXT primary key is not a sequential scan.** SQLite
+  satisfies the sort by walking `sqlite_autoindex_quivers_1` and seeking the
+  table once per row — the same random-read pathology as writing row by row,
+  and `EXPLAIN QUERY PLAN` names it (`SCAN quivers USING INDEX ...` versus a
+  plain `SCAN quivers`). Scan unordered and sort the survivors in Python.
+
+### The mutation-finite classes are not a sampling problem
+
+A capped label pass **cannot decide a class larger than its cap**: the BFS
+neither drains nor crosses the wall, so every member comes back *unknown*. At
+`label_cap = 20` that swallowed all thirteen of rank 6's mutation-finite
+classes. Three of them (A6, D6, E6, at 49/80/67 quivers) were rescued only
+because the 250k uniform sample happened to land in all three — a ~3 % event —
+and the other ten were exported with no `mutation_classes` row at all.
+
+Sampling is the wrong instrument here: 428 of the cell's 42,514,454 quivers are
+mutation-finite, so any individual class is a one-in-a-million target. Two
+stages fix it, and both are cheap because the survivors are so few:
+
+* `stage_resolve` re-explores whatever is still unknown at `RESOLVE_CAP`
+  (100,000). Rank 6 had 492 leftovers and settled all of them in ~30 s. The cap
+  has to be large, not merely larger: the slowest infinite one visits 1,089
+  quivers before it crosses.
+* `stage_finite_classes` explores every mutation-finite class to completion
+  (uncapped — finiteness is already proved, so the walk terminates) and stores
+  it with its labeled orbit.
+
+Rank 6's complete mutation-finite census is **13 classes over 428 quivers**:
+A6 (49), D6 (80), E6 (67); four mutation-acyclic classes at 42/40/36/22 — three
+on a 6-cycle (the Ã(p,q) with p+q=6) and one of D̃5 shape; and six
+non-mutation-acyclic classes at 48/24/6/5/5/4 (surface and exceptional types).
+Together they hold 250,830 labeled matrices.
+
+Never let the finite classes depend on a sample. They are the mathematically
+interesting rows in the entire cell.
 
 The pipeline is pure standard-library Python, so the job runs on the system's
 native arm64 interpreter rather than the x86_64 venv, which is translated by
