@@ -93,6 +93,16 @@ hoping the sample finds them. Mutation-finite quivers are rare — 428 of
 42.5 M at rank 6, in 13 classes — and they are the mathematically
 interesting ones, so they must never be left to chance.
 
+**Never name a mutation class by hand.** `qmd/surfaces.py` builds marked
+surfaces from triangle gluings, reads off `(genus, boundary, punctures)` by
+Euler's formula and the adjacency quiver from the same data, and so generates
+`mc_id -> surface name` for every surface class of a rank (`reference_for`,
+cached in `dist/surface-reference.json`; guarded by `SURFACE_MAX_RANK`, 8 by
+default). `d1_export` fills `label` from `dynkin.classify` and falls back to
+`surfaces.classify`, so a new rank names itself. Anything a rank leaves
+unlabelled is genuinely exceptional — at rank 6 exactly X6 — and only those
+need an entry in `data/nicknames.json`.
+
 Seeds come from `qmd/census.py`: **orderly generation** (exact census of the
 cell (n, bound); parallel) or **sampling** for cells that are not finite jobs
 (see the size table in docs/PHASE2.md §1 — anything ≳ 10⁷ classes). Parallel

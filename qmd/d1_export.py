@@ -46,7 +46,7 @@ import os
 from typing import Iterable, Iterator, Optional
 
 from qmd import __version__ as PIPELINE_VERSION
-from qmd import dynkin, invariants
+from qmd import dynkin, invariants, surfaces
 from qmd import local_acyclicity as la
 from qmd.class_properties import TRI, la_bounds, resolve_mutation_acyclic
 from qmd.core import (
@@ -130,12 +130,16 @@ def _class_job(args: tuple) -> tuple:
     """Worker: the per-class searches that only need the canonical rep."""
     mc_id, rep, is_open, complete, la_timeout = args
     dtype = dynkin.classify(rep, mc_id) if complete else None
+    # Not a Dynkin type, but it may still be a triangulated surface. This is
+    # what stops a rank from needing to be named by hand: the surface table is
+    # generated, not curated.
+    stype = surfaces.classify(rep, mc_id) if complete and dtype is None else None
     bounds = la_bounds(is_open)
     if la_timeout is not None and is_open:
         bounds["timeout"] = la_timeout
     if la_timeout == 0 and is_open:
-        return (mc_id, dtype, ("unknown", None), ("unknown", None), ("unknown", None))
-    return (mc_id, dtype,
+        return (mc_id, dtype, stype, ("unknown", None), ("unknown", None), ("unknown", None))
+    return (mc_id, dtype, stype,
             la.banff_status(rep, **bounds),
             la.louise_status(rep, **bounds),
             la.p_prime_status(rep, **bounds))
@@ -211,9 +215,11 @@ def build_rank_rows(result: GenerationResult, n: int,
         known=known_acyclicity,
     )
 
-    # Warm the Dynkin reference in the parent so forked workers inherit it.
+    # Warm the Dynkin and surface references in the parent so forked workers
+    # inherit them instead of each rebuilding the table.
     if any(mc.exploration == "complete" for mc in classes.values()):
         dynkin.reference_for(n)
+        surfaces.reference_for_rank(n)
 
     ordered = sorted(classes)
     searched = _pmap(_class_job, [
@@ -223,7 +229,7 @@ def build_rank_rows(result: GenerationResult, n: int,
 
     class_rows: list[dict] = []
     finite_by_class: dict[str, Optional[bool]] = {}
-    for mc_id, dtype, (b_state, b_w), (l_state, l_w), (p_state, p_w) in searched:
+    for mc_id, dtype, stype, (b_state, b_w), (l_state, l_w), (p_state, p_w) in searched:
         mc = classes[mc_id]
         rep = mc.canonical_rep
         fin, inf, exp, extra_prov = _finiteness(mc, n)
@@ -245,7 +251,9 @@ def build_rank_rows(result: GenerationResult, n: int,
             "distinct_quiver_count": mc.distinct_quiver_count,
             "merged_orbit_count": mc.merged_orbit_count,
             "dynkin_type": dtype,
-            "label": dtype,
+            # `label` is the best human name we have: the Dynkin type when
+            # there is one, otherwise the surface the class comes from.
+            "label": dtype or stype,
             "is_finite_confirmed": fin,
             "is_infinite_confirmed": inf,
             "is_infinite_expected": exp,

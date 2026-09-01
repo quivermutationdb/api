@@ -160,6 +160,49 @@ Together they hold 250,830 labeled matrices.
 Never let the finite classes depend on a sample. They are the mathematically
 interesting rows in the entire cell.
 
+### Naming them: surfaces, generated not curated
+
+By Fomin–Shapiro–Thurston every mutation-finite quiver of rank ≥ 3 either comes
+from a triangulated marked surface or is one of eleven exceptional classes.
+`qmd/surfaces.py` makes the surface half constructive: a triangulation is `t`
+triangles with a partial matching on their `3t` sides, from which the genus,
+boundary components and punctures follow by Euler's formula and the adjacency
+quiver from the counter-clockwise arrow rule. Since the flip graph of a surface
+is connected, ONE triangulation per surface yields the whole mutation class.
+
+Enumerating surfaces is exact (`n = 6g + 3b + 3p + c - 6`); finding a
+triangulation for each is done by seeded random gluing, because the number of
+matchings on 3t sides is astronomical by rank 8 while the number of surfaces is
+tiny. Coverage is then checked against the enumeration, so a miss is reported
+rather than silently dropped. Ranks 3–8 are fully covered in seconds (rank 8
+takes ~85 s, almost all of it exploring the classes, and the table is cached).
+
+The result cross-checks against `qmd/dynkin.py` at every rank — the (n+3)-gon is
+A_n and the once-punctured n-gon is D_n — and reproduces the curated Markov
+nickname as the once-punctured torus. Rank 6's thirteen classes come out as:
+
+| quivers | class |
+|--------:|-------|
+| 80 | once-punctured 6-gon (**D6**) |
+| 67 | **E6** — exceptional, not a surface |
+| 49 | 9-gon (**A6**) |
+| 48 | once-punctured annulus(1,2) |
+| 42 | annulus(1,5) = Ã(1,5) |
+| 40 | twice-punctured 3-gon = D̃5 |
+| 36 | annulus(2,4) = Ã(2,4) |
+| 24 | torus, 1 boundary, 3 marked points |
+| 22 | annulus(3,3) = Ã(3,3) |
+| 6 | pair of pants(1,1,1) |
+| 5 | twice-punctured torus |
+| 5 | **X6** — exceptional, not a surface |
+| 4 | 4-punctured sphere |
+
+Eleven surfaces plus E6 and X6 is exactly thirteen, which is an independent
+confirmation that the census found precisely the right classes. That X6 is
+absent from the surface table is required, not incidental: Derksen–Owen proved
+it is not block decomposable, and a surface landing on it would mean the module
+is wrong. The test suite asserts exactly that.
+
 The pipeline is pure standard-library Python, so the job runs on the system's
 native arm64 interpreter rather than the x86_64 venv, which is translated by
 Rosetta at roughly 0.6x. The golden n<=4 ids are identical on both
