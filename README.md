@@ -7,6 +7,10 @@ server for agents (`/mcp`), backed by a D1 database. The Python math pipeline
 (`qmd/`) runs offline and exports SQL for D1. See `CLAUDE.md` for the
 architecture guide and `docs/PHASE2.md` for the scaling design.
 
+> **Planned:** the database is moving from D1 to PlanetScale Postgres, with the
+> bulk census published to R2. Decided 2026-09-01, not yet started — it waits on
+> ranks 7 and 8 finishing. See `docs/PLANETSCALE.md`.
+
 **For agents and scripts:** [`/llms.txt`](https://quivermutationdb.org/llms.txt) ·
 [`/api/openapi.json`](https://quivermutationdb.org/api/openapi.json) ·
 MCP at `https://quivermutationdb.org/mcp` · bulk pulls via

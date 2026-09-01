@@ -10,6 +10,14 @@ The whole system runs on Cloudflare (one Worker + one D1 database); the
 earlier hosting stack was decommissioned in August 2026 and survives only in
 git history. This file describes the current system.
 
+> **Planned move off D1 — decided 2026-09-01, NOT started.** The next platform
+> is PlanetScale Postgres (PS-40) with the bulk census in R2, provisioned from
+> the Cloudflare dashboard so it bills to the Cloudflare account. Everything
+> below still describes reality; nothing has been provisioned. **Do not begin
+> the migration until ranks 7 and 8 have finished generating** — their row
+> counts are inputs to the sizing. Plan, sticking points and the resume
+> checklist: `docs/PLANETSCALE.md`.
+
 ## Architecture
 
 - **One Cloudflare Worker** (`qmd`, wrangler.jsonc) serves both the API
