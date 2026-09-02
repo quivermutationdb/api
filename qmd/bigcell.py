@@ -48,7 +48,7 @@ from qmd.d1_export import (
     EXPLORE_BOUND, _atomic_write, _insert_stmts, _header, _load_json, _lit, _shard_counts,
     _shards_config, _sha256_file, build_rank_rows, shard_keys_for, shard_of,
     _MC_COLUMNS, _LABELING_COLUMNS, _QUIVER_COLUMNS, _STATS_COLUMNS, _PartWriter,
-    DEFAULT_PART_BYTES, _labeling_rows,
+    DEFAULT_PART_BYTES, _labeling_rows, _curated_seeds,
 )
 from qmd.encoding import decode_upper, encode_upper
 
@@ -101,6 +101,11 @@ def _db(path: str) -> sqlite3.Connection:
     con.execute("PRAGMA temp_store=MEMORY")
     con.execute("PRAGMA mmap_size=%d" % (8 << 30))
     return con
+
+
+def _tri(v) -> Optional[int]:
+    """Three-state boolean to SQLite: 1 / 0 / NULL (unknown)."""
+    return None if v is None else int(v)
 
 
 def _stage_done(con, name) -> bool:
@@ -179,6 +184,31 @@ def stage_generate(con, n: int, h: int, workers: int, log) -> None:
                          f"(resume by re-running; parents_done has {len(done) + len(todo)} entries)")
     _mark(con, "generate", {"quivers": total})
     log(f"  generate: {total} quivers (matches the exact count)")
+
+
+def stage_generate_sample(con, n: int, h: int, k: int, seed: int, log) -> None:
+    """
+    Seed the scratch table with a uniform sample of the cell, for cells that
+    cannot be enumerated: (8,1) holds 572,849,763 connected quivers.
+
+    The sample is drawn over labeled matrices and then canonicalised, so
+    symmetric quivers are under-represented exactly as they are among labeled
+    matrices (`qmd.census.sample_cell`) — document that with any ML dataset.
+    The mutation-finite classes are NOT left to this draw: they are seeded by
+    construction in `finite_class_seeds`.
+    """
+    if _stage_done(con, "generate"):
+        log("  generate: done")
+        return
+    exact = census.count_connected_quivers(n, h)
+    log(f"    sampling {k:,} of {exact:,} connected quivers in the cell ...")
+    picks = census.sample_cell(n, h, k, seed=seed, connected_only=True)
+    con.executemany("INSERT OR IGNORE INTO quivers (id, upper) VALUES (?, ?)",
+                    [(quiver_id(m), encode_upper(m)) for m in picks])
+    con.commit()
+    total = con.execute("SELECT count(*) FROM quivers").fetchone()[0]
+    _mark(con, "generate", {"quivers": total, "cell_sample": k})
+    log(f"  generate: {total} sampled quivers (cell {exact:,})")
 
 
 # ---------------------------------------------------------------------------
@@ -507,7 +537,26 @@ def finite_class_seeds(con, n: int, log) -> list:
         # Proved finite already, so an uncapped walk terminates.
         seen |= set(_bfs_unlabeled(m, EXPLORE_BOUND, None).qid_set)
         seeds.append(m)
-    log(f"    {len(seeds)} mutation-finite class(es) over {len(rows)} quivers")
+    from_cell = len(seeds)
+
+    # The constructed seeds. A cell taken at |b_ij| <= 1 need not contain any
+    # member of a finite class whose every quiver carries a double arrow, and a
+    # SAMPLED cell (rank 8) need not contain one even when the full cell would
+    # — so the Dynkin, affine and surface types go in by construction rather
+    # than by discovery.
+    for m in _curated_seeds(n, log):
+        if quiver_id(m) in seen:
+            continue
+        orbit = _bfs_unlabeled(m, EXPLORE_BOUND, RESOLVE_CAP)
+        if orbit.crossed or orbit.is_open:
+            # Never explore an unproven seed uncapped below.
+            log(f"    WARNING: curated seed {quiver_id(m)} did not drain under "
+                f"cap {RESOLVE_CAP} (crossed={orbit.crossed}); skipped")
+            continue
+        seen |= set(orbit.qid_set)
+        seeds.append(m)
+    log(f"    {len(seeds)} mutation-finite class(es): {from_cell} found in the cell, "
+        f"{len(seeds) - from_cell} constructed")
     return seeds
 
 
@@ -535,12 +584,34 @@ def stage_finite_classes(con, n: int, workers: int, la_timeout, known, log) -> d
     rows = build_rank_rows(result, n, known_acyclicity=known, bound=2, node_cap=None,
                            generator="finite", census_size=None, la_timeout=la_timeout,
                            workers=workers, progress=prog)
+    # Every member of a complete class needs a quiver row, including members
+    # outside the cell — storing the FULL mutation class of every Dynkin and
+    # surface type is the point. stage_export reads quiver rows straight from
+    # the scratch table, so the strays are inserted here with the invariants
+    # build_rank_rows already computed for them.
+    added = 0
     for q in rows["quivers"]:
-        con.execute("UPDATE quivers SET mutation_class_id=?, labeling_count=?, "
-                    "mutation_finite=coalesce(mutation_finite, ?) WHERE id=?",
-                    (q["mutation_class_id"], q["labeling_count"], q["mutation_finite"], q["id"]))
+        present = con.execute("SELECT 1 FROM quivers WHERE id = ?", (q["id"],)).fetchone()
+        if present is None:
+            con.execute(
+                "INSERT INTO quivers (id, upper, max_edge, is_acyclic, is_connected, "
+                "is_bipartite, is_abundant, is_planar, representation_type, symmetry_group, "
+                "mutation_finite, mutation_class_id, labeling_count, invariants_done, "
+                "label_done) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,1,1)",
+                (q["id"], q["exchange_matrix"], q["max_edge"], int(q["is_acyclic"]),
+                 int(q["is_connected"]), _tri(q["is_bipartite"]), _tri(q["is_abundant"]),
+                 _tri(q["is_planar"]), q["representation_type"],
+                 json.dumps(q["symmetry_group"]) if q["symmetry_group"] else None,
+                 _tri(q["mutation_finite"]), q["mutation_class_id"], q["labeling_count"]))
+            added += 1
+        else:
+            con.execute("UPDATE quivers SET mutation_class_id=?, labeling_count=?, "
+                        "mutation_finite=coalesce(mutation_finite, ?) WHERE id=?",
+                        (q["mutation_class_id"], q["labeling_count"],
+                         q["mutation_finite"], q["id"]))
     con.commit()
-    log(f"    {len(rows['mutation_classes'])} finite class row(s)")
+    log(f"    {len(rows['mutation_classes'])} finite class row(s), "
+        f"{added} member(s) inserted from outside the cell")
     return rows
 
 
@@ -622,7 +693,8 @@ def _quiver_rows(con, n: int) -> Iterator[dict]:
 
 
 def stage_export(con, out_dir: str, n: int, h: int, class_rows: dict, node_cap: int,
-                 sample_k: int, part_bytes: int, log) -> list[dict]:
+                 sample_k: int, part_bytes: int, log,
+                 cell_sample: Optional[int] = None) -> list[dict]:
     cfg = _shards_config()
     total = con.execute("SELECT count(*) FROM quivers").fetchone()[0]
     parts: list[dict] = []
@@ -658,7 +730,8 @@ def stage_export(con, out_dir: str, n: int, h: int, class_rows: dict, node_cap: 
         "bound": h, "node_cap": node_cap,
         "generated_at": _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
         "pipeline_version": PIPELINE_VERSION,
-        "generator": f"orderly; classes for sample:{sample_k}",
+        "generator": (f"cell-sample:{cell_sample}" if cell_sample else "orderly")
+                     + f"; classes for sample:{sample_k}",
         "census_size": census.count_connected_quivers(n, h),
         "shard_counts": shard_counts,
     }
@@ -675,7 +748,7 @@ def stage_export(con, out_dir: str, n: int, h: int, class_rows: dict, node_cap: 
 # ---------------------------------------------------------------------------
 
 def export_big_cell(out_dir: str, *, n: int, h: int, label_cap: int = 20, node_cap: int = 100,
-                    resolve_cap: int = RESOLVE_CAP,
+                    resolve_cap: int = RESOLVE_CAP, cell_sample: Optional[int] = None,
                     sample: int = 1_000_000, sample_seed: int = 0, workers: int = 8,
                     la_timeout: Optional[float] = 1.0, part_bytes: int = DEFAULT_PART_BYTES,
                     log=_log) -> None:
@@ -683,7 +756,10 @@ def export_big_cell(out_dir: str, *, n: int, h: int, label_cap: int = 20, node_c
     path = os.path.join(out_dir, f"work-n{n}.sqlite")
     con = _db(path)
     log(f"  rank {n} (cell |b_ij| <= {h}): streaming pipeline in {path}")
-    stage_generate(con, n, h, workers, log)
+    if cell_sample:
+        stage_generate_sample(con, n, h, cell_sample, sample_seed, log)
+    else:
+        stage_generate(con, n, h, workers, log)
     stage_invariants(con, path, n, workers, log)
     stage_label(con, path, n, label_cap, workers, log)
     stage_resolve(con, n, resolve_cap, workers, log)
@@ -699,7 +775,8 @@ def export_big_cell(out_dir: str, *, n: int, h: int, label_cap: int = 20, node_c
     # are explored explicitly and merged in.
     class_rows = _merge_class_rows(
         class_rows, stage_finite_classes(con, n, workers, la_timeout, known, log))
-    parts = stage_export(con, out_dir, n, h, class_rows, node_cap, sample, part_bytes, log)
+    parts = stage_export(con, out_dir, n, h, class_rows, node_cap, sample, part_bytes, log,
+                         cell_sample=cell_sample)
     _atomic_write(os.path.join(out_dir, f"acyclicity-n{n}.json"),
                   json.dumps(class_rows["acyclicity_by_qid"], sort_keys=True))
 
@@ -714,7 +791,8 @@ def export_big_cell(out_dir: str, *, n: int, h: int, label_cap: int = 20, node_c
         "parts": parts,
         "depends_on": {f"acyclicity-n{j}.json": _sha256_file(os.path.join(out_dir, f"acyclicity-n{j}.json")) for j in range(1, n)},
         "settings": {"bound": h, "node_cap": node_cap, "label_cap": label_cap,
-                     "resolve_cap": resolve_cap, "generator": "bigcell",
+                     "resolve_cap": resolve_cap, "cell_sample": cell_sample,
+                     "generator": "bigcell",
                      "sample": sample, "la_timeout": la_timeout, "schema": 3},
         "quiver_count": con.execute("SELECT count(*) FROM quivers").fetchone()[0],
         "class_count": len(class_rows["mutation_classes"]),

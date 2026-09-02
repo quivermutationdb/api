@@ -383,3 +383,50 @@ def test_parallel_bfs_matches_the_sequential_loop_exactly():
     for mc_id, mc in one.classes.items():
         assert mc.distinct_quiver_count == many.classes[mc_id].distinct_quiver_count
         assert mc.labeled_size == many.classes[mc_id].labeled_size
+
+
+def test_bigcell_guarantees_full_classes_for_every_dynkin_and_surface_type(tmp_path):
+    """
+    The guarantee ranks 7 and 8 depend on: every Dynkin and surface type of the
+    rank is in the dataset with its COMPLETE mutation class, and every member
+    has a quiver row — including members outside the cell.
+
+    Run at bound 1 with a tiny label cap and a one-quiver class sample, so
+    nothing can arrive by luck: the (4,1) cell cannot contain a finite class
+    whose members all carry double arrows, and a 1-seed sample finds nothing.
+    Whatever is present is present by construction.
+    """
+    import json, os, sqlite3
+    from qmd import bigcell, d1_export, dynkin, surfaces
+    logs = []
+    d1_export.export_ranks(str(tmp_path), max_vertices=3, bound=2, log=logs.append)
+    bigcell.export_big_cell(str(tmp_path), n=4, h=1, label_cap=2, node_cap=100,
+                            sample=1, workers=2, la_timeout=0, log=logs.append)
+
+    con = sqlite3.connect(":memory:")
+    drizzle = os.path.join(os.path.dirname(__file__), "..", "drizzle")
+    for name in sorted(os.listdir(drizzle)):
+        if name.endswith(".sql"):
+            con.executescript(open(os.path.join(drizzle, name)).read()
+                              .replace("--> statement-breakpoint", ""))
+    manifest = json.load(open(os.path.join(str(tmp_path), "manifest.json")))
+    for part in manifest["ranks"]["4"]["parts"]:
+        con.executescript(open(os.path.join(str(tmp_path), part["file"])).read())
+
+    # nothing left undecided
+    assert con.execute(
+        "SELECT count(*) FROM quivers WHERE mutation_finite IS NULL").fetchone()[0] == 0
+
+    want = dict(dynkin.reference_for(4))
+    want.update(surfaces.reference_for(4))
+    assert want, "no reference types for rank 4"
+    for mc_id, name in want.items():
+        row = con.execute("SELECT exploration, distinct_quiver_count FROM mutation_classes "
+                          "WHERE id = ?", (mc_id,)).fetchone()
+        assert row is not None, f"{name} ({mc_id}) has no class row"
+        assert row[0] == "complete", f"{name} stored as {row[0]!r}"
+        # every member of the class must have its own quiver row
+        stored = con.execute(
+            "SELECT count(*) FROM quivers WHERE mutation_class_id = ?", (mc_id,)).fetchone()[0]
+        assert stored == row[1], \
+            f"{name}: {stored} quiver rows for a class of {row[1]} distinct quivers"
