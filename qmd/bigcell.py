@@ -640,7 +640,7 @@ def _merge_class_rows(a: dict, b: dict) -> dict:
 # 4. sample: class rows for K quivers via the normal pipeline
 # ---------------------------------------------------------------------------
 
-def stage_sample(con, n: int, k: int, node_cap: int, workers: int, seed: int, la_timeout, known, log) -> dict:
+def stage_sample(con, n: int, h: int, k: int, node_cap: int, workers: int, seed: int, la_timeout, known, log) -> dict:
     """
     Class rows for a uniform sample of k quivers, via the normal pipeline.
 
@@ -676,7 +676,12 @@ def stage_sample(con, n: int, k: int, node_cap: int, workers: int, seed: int, la
                             seeds=seeds, workers=workers, progress=prog)
     log(f"    {len(result.quivers)} quivers in {len(result.classes)} classes "
         f"(~{len(result.quivers) * 768 / 1e9:.1f} GB resident); class invariants ...")
-    rows = build_rank_rows(result, n, known_acyclicity=known, bound=2, node_cap=node_cap,
+    # bound=h, not 2: the cell filter in build_rank_rows then drops the explored
+    # quivers that are outside the cell, which is both what the export wants and
+    # what keeps the write-back below from issuing one random primary-key UPDATE
+    # per explored quiver. At rank 7 that was 3,870,276 statements against a
+    # 2,120,098-row table, 1.75 M of them no-ops on rows that do not exist.
+    rows = build_rank_rows(result, n, known_acyclicity=known, bound=h, node_cap=node_cap,
                            generator="orderly", census_size=None, la_timeout=la_timeout,
                            workers=workers, progress=prog)
     # Write class membership + finiteness back to the scratch table.
@@ -789,7 +794,7 @@ def export_big_cell(out_dir: str, *, n: int, h: int, label_cap: int = 20, node_c
         if ck is None:
             raise SystemExit(f"rank {n} needs acyclicity-n{j}.json — export the lower ranks first")
         known.update(ck)
-    class_rows = stage_sample(con, n, sample, node_cap, workers, sample_seed, la_timeout, known, log)
+    class_rows = stage_sample(con, n, h, sample, node_cap, workers, sample_seed, la_timeout, known, log)
     # Sampling cannot be relied on to find the mutation-finite classes, so they
     # are explored explicitly and merged in.
     class_rows = _merge_class_rows(
