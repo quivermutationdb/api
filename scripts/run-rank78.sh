@@ -47,15 +47,23 @@ mkdir -p "$(dirname "$LOG")"
 "$PY" -c "import sys; sys.path.insert(0,'.'); import qmd.bigcell, qmd.surfaces" \
   || { echo "cannot import qmd with $PY" >&2; exit 1; }
 
-echo "generating ranks 7 then 8 via bigcell with $PY -> $LOG"
+# Usage: run-rank78.sh [7|8|both]   (default both)
+WHICH=${1:-both}
+echo "generating rank(s) $WHICH via bigcell with $PY -> $LOG"
 exec scripts/run-detached.sh "$LOG" "$PY" -c "
 import sys; sys.path.insert(0, '.')
 from qmd.bigcell import export_big_cell
-print('=== rank 7 (cell enumerated) ===', flush=True)
-export_big_cell('dist/d1', n=7, h=1, label_cap=20, node_cap=100,
-                sample=45_000, workers=8, la_timeout=0.0)
-print('=== rank 8 (cell sampled) ===', flush=True)
-export_big_cell('dist/d1', n=8, h=1, label_cap=20, node_cap=100,
-                cell_sample=250_000, sample=45_000, workers=8, la_timeout=0.0)
+which = '$WHICH'
+if which in ('7', 'both'):
+    print('=== rank 7 (cell enumerated) ===', flush=True)
+    export_big_cell('dist/d1', n=7, h=1, label_cap=20, node_cap=100,
+                    sample=45_000, workers=8, la_timeout=0.0)
+if which in ('8', 'both'):
+    print('=== rank 8 (cell sampled) ===', flush=True)
+    # 32k, not rank 7's 45k: rank-8 matrices are 936 B (vs 768) and every
+    # cap-100 orbit fills the cap with no overlap, so 45k seeds would hold
+    # ~4.2 GB where rank 7 held 3.0 GB. 32k x 100 x 936 B ~= 3.0 GB.
+    export_big_cell('dist/d1', n=8, h=1, label_cap=20, node_cap=100,
+                    cell_sample=250_000, sample=32_000, workers=8, la_timeout=0.0)
 print('=== done ===', flush=True)
 "
