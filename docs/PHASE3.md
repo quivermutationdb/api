@@ -216,6 +216,28 @@ ones from `data/seeds.json`. Exploration runs at `EXPLORE_BOUND = 2`, so each
 seed drags its whole class in, double arrows and all — which is why
 `quiver_count` exceeds the cell size at these ranks.
 
+**The class sample is a memory budget, not a coverage knob.** `run_generation`
+holds every explored quiver in memory (768 bytes per rank-7 matrix), and a cell
+bound below `EXPLORE_BOUND` sends orbits outside the cell, so the same seed
+count explores ~6x more at rank 7 than at rank 6:
+
+| | seeds | explored | resident |
+|---|---|---|---|
+| rank 6 | 250,000 | 2,395,384 | 1.8 GB — fine |
+| rank 7 | 250,000 | 14,678,008 | 11.3 GB — thrashed 16 GB, 7.5 % CPU over 49 h |
+| rank 7 | 45,000 | ~2,642,000 | ~2.0 GB |
+
+Size the sample from the measured quivers-per-seed of the rank, never from what
+the previous rank used. Chunking it is **not** a way around the limit: the
+`mc_id` of a partially explored class is the lex-min over the members that were
+explored, so seeds of one class split across chunks mint two different ids
+instead of gluing into one class. The mutation-finite classes do not depend on
+this sample at all — `finite_class_seeds` seeds them by construction — so a
+smaller sample costs class-row coverage of the *infinite* classes and nothing
+else. bigcell's stage markers make this cheap to get wrong: generate,
+invariants, label and resolve are all checkpointed, so a restart resumes at the
+sample stage.
+
 **A rank's quiver rows are the cell plus the finite classes.** Exploration
 always runs at `EXPLORE_BOUND = 2`, so a cell taken at a lower bound — ranks 7
 and 8 use `|b_ij| <= 1` — sends the BFS into weight-2 quivers outside the cell.

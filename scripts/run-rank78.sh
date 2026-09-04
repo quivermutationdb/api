@@ -10,7 +10,20 @@
 # holds the census whole.
 #
 #   (7, 1)  2,120,098 connected quivers — cell enumerated exactly
-#   (8, 1)  572,849,763 connected — far too many, so --cell-sample draws 250k
+#   (8, 1)  572,849,763 connected — far too many, so cell_sample draws 250k
+#
+# `sample` (the CLASS-row sample) is 45k, not rank 6's 250k, and that is a
+# memory budget rather than a preference. run_generation holds every explored
+# quiver in memory at 768 bytes each, and a cell bound below EXPLORE_BOUND
+# sends orbits outside the cell:
+#
+#     rank 6, 250k seeds  ->  2,395,384 quivers  ->  1.8 GB   (fine)
+#     rank 7, 250k seeds  -> 14,678,008 quivers  -> 11.3 GB   (thrashed 16 GB)
+#     rank 7,  45k seeds  -> ~2,642,000 quivers  -> ~2.0 GB   (rank 6's profile)
+#
+# The finite classes do NOT depend on this sample — they are seeded by
+# construction in finite_class_seeds — so a smaller sample costs class-row
+# coverage of the infinite classes and nothing else.
 #
 # Both ranks get, exactly as rank 6 did:
 #   * a finiteness verdict for EVERY quiver in the scratch table (label, then
@@ -40,9 +53,9 @@ import sys; sys.path.insert(0, '.')
 from qmd.bigcell import export_big_cell
 print('=== rank 7 (cell enumerated) ===', flush=True)
 export_big_cell('dist/d1', n=7, h=1, label_cap=20, node_cap=100,
-                sample=250_000, workers=8, la_timeout=0.0)
+                sample=45_000, workers=8, la_timeout=0.0)
 print('=== rank 8 (cell sampled) ===', flush=True)
 export_big_cell('dist/d1', n=8, h=1, label_cap=20, node_cap=100,
-                cell_sample=250_000, sample=250_000, workers=8, la_timeout=0.0)
+                cell_sample=250_000, sample=45_000, workers=8, la_timeout=0.0)
 print('=== done ===', flush=True)
 "

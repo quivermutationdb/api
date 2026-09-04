@@ -641,6 +641,24 @@ def _merge_class_rows(a: dict, b: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 def stage_sample(con, n: int, k: int, node_cap: int, workers: int, seed: int, la_timeout, known, log) -> dict:
+    """
+    Class rows for a uniform sample of k quivers, via the normal pipeline.
+
+    **k is a memory budget, not a coverage knob.** run_generation holds every
+    explored quiver in memory, and one rank-7 matrix costs 768 bytes:
+
+        rank 6, 250k seeds  ->  2,395,384 quivers  ->  1.8 GB   (fine)
+        rank 7, 250k seeds  -> 14,678,008 quivers  -> 11.3 GB   (thrashed 16 GB)
+
+    Orbits at a cell bound below EXPLORE_BOUND escape the cell, so the same k
+    explores ~6x more at rank 7 than at rank 6. Size k from the measured
+    quivers-per-seed of the rank, not from what a previous rank used.
+
+    Chunking k is NOT a way around this: the mc_id of a partially explored
+    class is the lex-min over the members that were explored, so seeds of one
+    class split across chunks mint two different ids instead of gluing into
+    one. The sample has to fit in one run_generation call.
+    """
     total = con.execute("SELECT count(*) FROM quivers").fetchone()[0]
     rng = random.Random(seed)
     # Uniform sample of rowids (ids are in insertion = arbitrary parent order; sample by rowid).
@@ -656,7 +674,8 @@ def stage_sample(con, n: int, k: int, node_cap: int, workers: int, seed: int, la
             log(f"    {stage}: {i}/{tot}")
     result = run_generation(max_vertices=n, bound=EXPLORE_BOUND, ranks=[n], node_cap=node_cap,
                             seeds=seeds, workers=workers, progress=prog)
-    log(f"    {len(result.quivers)} quivers in {len(result.classes)} classes; class invariants ...")
+    log(f"    {len(result.quivers)} quivers in {len(result.classes)} classes "
+        f"(~{len(result.quivers) * 768 / 1e9:.1f} GB resident); class invariants ...")
     rows = build_rank_rows(result, n, known_acyclicity=known, bound=2, node_cap=node_cap,
                            generator="orderly", census_size=None, la_timeout=la_timeout,
                            workers=workers, progress=prog)
