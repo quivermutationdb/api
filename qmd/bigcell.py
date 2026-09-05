@@ -18,7 +18,7 @@ stage; each stage is resumable and parallel:
   3b. resolve   re-explore whatever the capped label pass left unknown, at a
                 cap high enough to settle it (a class bigger than the label
                 cap can never drain, so every finite class above it comes back
-                unknown); hundreds of rows, seconds of work
+                unknown); few rows, but see stage_resolve on what they cost
   4. sample     class rows for a uniform sample of K quivers (their full
                 capped explorations, glued, with invariants) via the normal
                 run_generation path, PLUS a complete exploration of every
@@ -464,7 +464,7 @@ def stage_label_apply(con, log, chunk: int = 200_000) -> int:
 RESOLVE_CAP = 100_000
 
 
-def stage_resolve(con, n: int, cap: int, workers: int, log, chunk: int = 50) -> None:
+def stage_resolve(con, n: int, cap: int, workers: int, log, chunk: int = 10) -> None:
     """
     Re-explore every quiver still marked *unknown*, at a cap high enough to
     settle it.
@@ -476,9 +476,21 @@ def stage_resolve(con, n: int, cap: int, workers: int, log, chunk: int = 50) -> 
     because the random sample happened to land in all three, a ~3% event.
 
     The leftovers are few — hundreds, not millions — so a second pass at a cap
-    three orders of magnitude larger costs seconds and leaves nothing
-    undecided. The slowest rank-6 quiver needed 1,089 visits before it crossed
-    the wall, which is why the cap here is not merely "a bit bigger".
+    three orders of magnitude larger leaves nothing undecided. The slowest
+    rank-6 quiver needed 1,089 visits before it crossed the wall, which is why
+    the cap here is not merely "a bit bigger".
+
+    **Few rows does not mean cheap.** Cost per seed grows brutally with rank,
+    because canonicalising one visited node is a lex-min over n! relabelings —
+    56x more work at rank 8 than at rank 6. Measured:
+
+        rank 6, 492 unknown  ->  seconds
+        rank 8, 565 unknown  ->  59 seeds drained in 11 h on 8 workers
+
+    Rank 8 is also memory-bound rather than compute-bound: eight concurrent
+    100k-node orbits pushed a 16 GB machine to 5.2 GB of swap and 125k page
+    decompressions/second, costing ~44% of the cores. If a rank ever needs it,
+    fewer workers here would beat more.
 
     Verdicts go through `label_verdicts` and the same id-ordered apply pass as
     the label stage; nothing is written to the big table row by row.
@@ -488,11 +500,25 @@ def stage_resolve(con, n: int, cap: int, workers: int, log, chunk: int = 50) -> 
     # No ORDER BY: on a TEXT PRIMARY KEY that would walk the implicit index and
     # seek the table once per row — 42 M random page reads. An unordered scan is
     # sequential, and the handful of survivors are sorted in Python.
+    #
+    # Skip whatever a previous run already settled. This stage is the most
+    # expensive per row in the pipeline — a rank-8 seed can spend hours filling
+    # a 100k-node orbit — and it is not marked done until every seed has
+    # drained, so without this test an interrupted run re-explores from
+    # scratch. Verdicts survive a kill (they are committed per batch) and
+    # `stage_label_apply` deletes each row as it folds it in, so anything still
+    # staged with a decided value is exactly this stage's completed work.
+    # NULL is *not* decided: an exhausted search records its seed as unknown,
+    # and those must be retried, not skipped.
     pending = sorted(con.execute(
-        "SELECT id, upper FROM quivers WHERE mutation_finite IS NULL").fetchall())
+        "SELECT q.id, q.upper FROM quivers q WHERE q.mutation_finite IS NULL "
+        "AND NOT EXISTS (SELECT 1 FROM label_verdicts v "
+        "                WHERE v.id = q.id AND v.value IS NOT NULL)").fetchall())
     log(f"    resolving {len(pending)} unknown quivers (cap {cap}) ...")
     if pending:
         import multiprocessing as mp
+        # Small batches: a batch commits only once every seed in it has drained,
+        # so the chunk size is the work a kill throws away, per worker.
         batches = [(i, n, cap, pending[i:i + chunk]) for i in range(0, len(pending), chunk)]
         settled = 0
         with mp.get_context("fork").Pool(workers) as pool:
@@ -502,7 +528,7 @@ def stage_resolve(con, n: int, cap: int, workers: int, log, chunk: int = 50) -> 
                                     [(q, value) for q in qids])
                 con.commit()
                 settled += 1
-                if settled % 20 == 0:
+                if settled % max(1, len(batches) // 20) == 0 or settled == len(batches):
                     log(f"    resolved {settled}/{len(batches)} batches")
         stage_label_apply(con, log)
     # Record which quivers were still unknown when this stage ran. An export
