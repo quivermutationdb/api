@@ -685,7 +685,19 @@ def stage_sample(con, n: int, h: int, k: int, node_cap: int, workers: int, seed:
     class split across chunks mint two different ids instead of gluing into
     one. The sample has to fit in one run_generation call.
     """
+    # Sample only the rows the generate stage produced. stage_finite_classes
+    # APPENDS complete-class members to this table, so on any re-run count(*)
+    # exceeds the census frame and a uniform draw over it spends ~k*f/N seeds on
+    # quivers already inside the mutation-finite classes -- which are explored
+    # exhaustively regardless, so those seeds yield no new class row. At rank 8
+    # the re-run drew 991 such seeds and lost 984 of 32,000 class rows. Generate
+    # rows are inserted first, so they are exactly rowid <= frame.
     total = con.execute("SELECT count(*) FROM quivers").fetchone()[0]
+    row = con.execute("SELECT info FROM stages WHERE name='generate'").fetchone()
+    if row and row[0]:
+        frame = json.loads(row[0]).get("quivers")
+        if frame:
+            total = min(total, frame)
     rng = random.Random(seed)
     # Uniform sample of rowids (ids are in insertion = arbitrary parent order; sample by rowid).
     picks = sorted(rng.sample(range(1, total + 1), min(k, total)))
