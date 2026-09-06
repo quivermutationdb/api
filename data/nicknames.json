@@ -957,6 +957,96 @@
       "note": "One of the two exceptional quivers found by Derksen and Owen (New Graphs of Finite Mutation Type, Electron. J. Combin. 15 (2008), arXiv:0804.0787). X6 is not block decomposable, so unlike every other mutation-finite rank-6 class it does not come from a triangulated surface. Its mutation class is famously tiny: 5 quivers, with 9 or 11 arrows (Du–Li–Pan, arXiv:2105.11278, Thm 3.17).",
       "added_by": "Blake Jackson",
       "added_at": "2026-09-01"
+    },
+    {
+      "mc_id": "MC.n8.e9303af7e4328df4",
+      "nickname": "E6^(1,1)",
+      "slug": "e6-1-1",
+      "matrix": [
+        [
+          0,
+          -2,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1
+        ],
+        [
+          2,
+          0,
+          0,
+          0,
+          0,
+          -1,
+          -1,
+          -1
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          -1,
+          0,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          -1,
+          0
+        ],
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          -1
+        ],
+        [
+          -1,
+          1,
+          1,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          -1,
+          1,
+          0,
+          1,
+          0,
+          0,
+          0,
+          0
+        ],
+        [
+          -1,
+          1,
+          0,
+          0,
+          1,
+          0,
+          0,
+          0
+        ]
+      ],
+      "note": "Exceptional mutation-finite type of rank 8: neither a surface type nor Dynkin/affine (qmd.dynkin.classify and qmd.surfaces.classify both return None). The rank-8 classification is 16 surface types plus E8, E7~ and this class, so it is E6^(1,1) by elimination. Recovered by exhaustive one-vertex hereditary extension of all 1,892 rank-7 mutation-finite quivers, which returned exactly this one new class. Mutation class: 49 quivers.",
+      "added_by": "Blake Jackson",
+      "added_at": "2026-09-06"
     }
   ]
 }
