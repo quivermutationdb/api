@@ -144,15 +144,95 @@ fits int4 — see the `seq integer` note in the checklist.
    CI-green (commit `47bdee9`), so they are exercised before the port rather
    than during it.
 
+## Measured Postgres footprint  (2026-09-07, Phase 0 — no longer an estimate)
+
+All 50,828,164 rows loaded into a local PostgreSQL 17, every index built
+fresh, `ANALYZE` run. Counts matched the manifest exactly (50,828,164 quivers /
+327,961 classes / 457,125 labelings).
+
+| table | heap | indexes | total |
+| --- | ---: | ---: | ---: |
+| quivers | 9,005 MB | 4,752 MB | 13.0 GB |
+| mutation_classes | 153 MB | 37 MB | 190 MB |
+| labelings | 54 MB | 43 MB | 97 MB |
+| rank_stats + class_nicknames | 16 kB | 48 kB | 80 kB |
+| **total** | **9.66 GB** | **5.07 GB** | **14.73 GB** |
+
+Per-row, for future ranks: **190 B/row heap** and **100 B/row of index** on
+`quivers`. Tuple width tracks matrix width almost linearly (156 B at rank 4,
+166 B at 5, 182 B at 6, 202 B at 7, 213 B at 8 — about 1.35 B per encoded
+character, the excess being 8-byte alignment padding).
+
+Largest single index: **`quivers_pkey` at 1,969 MB**, because it is a 21-char
+text key over 50.8 M rows. `idx_q_n_seq` is 1,089 MB — an int4 `seq` index
+costing roughly half a text-id one, which is the measured version of the plan's
+"the index-size argument gets stronger".
+
+### Verdict: PS-40 is viable
+
+* **Storage.** 14.73 GB against 10 GB included = 4.73 GB overage at $0.125/GB
+  ≈ **$0.59/month**, so ~$29.60 all-in. Not a tier driver.
+* **RAM.** The hot browse path — `quivers_pkey`, `idx_q_n_seq` and the two
+  class equivalents — is **3.08 GB**, which fits PS-40's 4 GB. The remaining
+  ~2 GB of filter indexes (`idx_q_n_max_edge`, `idx_q_n_finite`,
+  `idx_q_representation_type`, `idx_q_mc_labcount`, 336–351 MB each) stay cold
+  until someone filters on them. Tight but workable.
+* **The plan's estimate was right on the total and wrong on the split.** It
+  guessed 15–20 GB; the heap came in *below* the low end (9.66 GB, close to
+  SQLite's 11 GB rather than 1.5x it) while the indexes came in at more than
+  double the ~2.2 GB assumed. The consequence is that the risk is RAM
+  pressure on the filtered paths, not disk — which makes the `totalsFor`
+  regression the thing to watch, exactly as the pre-flight predicted.
+
+## Load-path defects found by doing it  (all fixed)
+
+Five, none of which are visible on paper. Two would have produced a database
+that loads cleanly and serves wrong results.
+
+1. **`UPDATE ... SET seq = row_number()` bloats every table ~2x.** MVCC writes
+   a new tuple version per update, so it leaves exactly one dead tuple per row:
+   `quivers` went 1,434 MB → 2,835 MB (1.98x) on 8.3 M rows, needing
+   `VACUUM FULL` and 2x transient disk. It was also the bulk of an **82-minute**
+   load. Replaced with `UNLOGGED` staging + `INSERT ... SELECT row_number()`:
+   the 42.5 M-row rank 6 then loaded in **8 min 50 s**, i.e. **47x faster per
+   row**, with zero dead tuples.
+2. **Per-shard export breaks `seq` silently.** `row_number() OVER (PARTITION BY
+   n ORDER BY id)` restarts at 1 in each shard, so four rank-6 rows would share
+   `seq = 1` and the keyset tiebreak in `src/api/cursor.ts` stops being unique.
+   The database loads cleanly and row counts check out; pagination then skips
+   and repeats rows. `scripts/pg-export.py` now requires every shard of a rank
+   in one invocation. Verified after loading: `seq` is unique, gapless 1..count,
+   and `(n, seq)` reproduces id order at every rank including rank 6 across all
+   four merged shards.
+3. **`rank_stats` collides on its primary key** — it is keyed by `n` and every
+   shard carries its own row for the rank, so the second shard's COPY is a
+   duplicate-key error. Deduped in the exporter.
+4. **The shard SQL parts cannot be concatenated.** Each part 001 opens with
+   `DELETE ... WHERE n = 6`, so loading four shards in sequence leaves only the
+   last — found by getting 10,630,908 rows where the manifest says 42,514,454.
+   Load each shard into its own SQLite, then merge at the COPY step. The four
+   then sum exactly and their ids are disjoint, which is the cross-shard
+   property D1 was breaking.
+5. **A primary key is an index and bloats like one.** Leaving only the PKs in
+   place during the rank-6 insert took `quivers_pkey` from 1,969 MB to
+   3,287 MB (1.67x, from page splits); `REINDEX` reclaimed **1.40 GB** across
+   the three tables. `drizzle-pg/0001_init.sql` therefore declares no primary
+   keys at all on `quivers`/`mutation_classes`/`labelings`, and
+   `0002_indexes.sql` adds them as `CREATE UNIQUE INDEX CONCURRENTLY` +
+   `ALTER TABLE ... ADD PRIMARY KEY USING INDEX`, with the labelings foreign
+   key added `NOT VALID` then validated separately. The three tiny tables keep
+   their keys inline.
+
+**Also stale:** `dist/d1/nicknames.sql` holds 1 entry against the 21 now in
+`data/nicknames.json`. Regenerate with `python scripts/nicknames.py --sql`
+before any load, or the curated names — E6^(1,1) included — silently do not
+ship.
+
 ## Still open
 
-1. **Measure the real Postgres footprint.** The one genuine unknown left. Load
-   ranks 6–8 into a local Postgres from `dist/d1`, `ANALYZE`, then read
-   `pg_total_relation_size` per table and index. 22-char text primary keys on
-   50.8 M rows plus PG's 23-byte tuple header should land at 15–20 GB against
-   SQLite's 11 GB — still an estimate. This settles PS-40 vs a larger steady
-   tier and the storage-overage figure.
-2. **Provision**, following §"Provisioning runbook" below.
+1. **Provision**, following §"Provisioning runbook" below. Phase 0 is done:
+   `drizzle-pg/*.sql` and `scripts/pg-export.py` are written and exercised
+   against a full local load.
 
 ## Pre-flight code review checklist  (reviewed 2026-09-07)
 
@@ -258,11 +338,24 @@ which cannot be tested until a pool exists — check it during the port.
 Ordered so that everything reversible happens before anything that is not, and
 so the one irreversible billing decision is the very first click.
 
-### Phase 0 — before the dashboard  (no Cloudflare involved)
+### Phase 0 — DONE  (2026-09-07)
 
-1. **Measure the footprint** (§"Still open" item 1). Do not pick a steady-state
-   tier from the estimate.
-2. **Decide three things** (they are inputs to the clicks below, and changing
+Measured, written and exercised against a full local load:
+`drizzle-pg/0001_init.sql`, `drizzle-pg/0002_indexes.sql`,
+`scripts/pg-export.py`. Footprint and the five load-path defects are above.
+Reproduce with:
+
+```bash
+brew install postgresql@17            # local only; brew uninstall reverses it
+# one SQLite per shard, since the parts each DELETE the rank (defect 4)
+python scripts/pg-export.py OUT tmp/qmd_n6_s0.sqlite ... tmp/qmd_n6_s3.sqlite
+psql -d qmd -f drizzle-pg/0001_init.sql
+psql -d qmd -f OUT/load.sql           # COPY -> staging -> INSERT with row_number()
+psql -d qmd -f drizzle-pg/0002_indexes.sql
+psql -d qmd -c ANALYZE
+```
+
+1. **Decide three things** (they are inputs to the clicks below, and changing
    them later is work):
    * **Region.** Match the Worker's traffic. Cross-region adds latency to every
      query that misses the Hyperdrive cache.
@@ -271,14 +364,10 @@ so the one irreversible billing decision is the very first click.
      previous census. Either keep `max_age` short, or rotate the config as a
      release step. Pick deliberately.
    * **Steady tier**, from the measurement.
-3. **Write the pg schema** (`drizzle-orm/pg-core`), with the decisions already
-   settled in the checklist: `seq integer`, `COLLATE "C"` on id columns, `jsonb`
-   for `provenance`/`symmetry_group`, real `boolean` (preserving three-state
-   NULL), `bigint` for `rank_stats` counters.
-4. **Write the COPY exporter.** This does not exist yet. `dist/d1/*.sql` is
-   `INSERT` statements for D1; Postgres wants `COPY ... FROM STDIN` with
-   TSV/CSV per table. Generate it from the same `d1_export` row builders so
-   there is one source of truth, not a SQL-to-CSV parser.
+2. **Port `src/db/schema.ts` to `drizzle-orm/pg-core`** so the Worker's types
+   match `drizzle-pg/0001_init.sql`. The raw DDL exists; the Drizzle
+   declaration does not, and it is what the query builder needs.
+3. **Regenerate `dist/nicknames.sql`** — the copy on disk is stale (see above).
 
 ### Phase 1 — create the database THROUGH Cloudflare  (billing: get this right first)
 
@@ -295,16 +384,30 @@ so the one irreversible billing decision is the very first click.
    before loading any data.
 8. Note the Hyperdrive config id and the connection string.
 
-### Phase 2 — load  (indexes last)
+### Phase 2 — load  (into a bare heap; every index afterwards)
 
-9. Apply the schema. **Create no indexes yet** beyond primary keys.
-10. `COPY` each table: `quivers`, `mutation_classes`, `labelings`,
-    `class_nicknames`, `rank_stats`. Ranks ascending.
-11. Populate `seq`: `row_number() OVER (PARTITION BY n ORDER BY id)`.
-12. `CREATE INDEX CONCURRENTLY` for each index in `schema.ts`. No 30-second
-    limit here — this is one of the four reasons we are leaving D1.
-13. `ANALYZE`, then re-read `pg_total_relation_size` and compare against the
-    Phase 0 measurement.
+9. `psql -f drizzle-pg/0001_init.sql`. This creates **no indexes at all, not
+    even primary keys** — see defect 5. Do not "helpfully" add them back.
+10. For each rank, build one SQLite per shard from `dist/d1` (the parts each
+    `DELETE` the rank, so they cannot share a database — defect 4), then
+    `python scripts/pg-export.py OUT <every shard of that rank>`. Passing
+    shards separately silently breaks `seq` — defect 2.
+11. `psql -f OUT/load.sql`. This COPYs into `UNLOGGED` staging and then
+    `INSERT ... SELECT row_number() OVER (PARTITION BY n ORDER BY id)`. Do
+    **not** substitute an `UPDATE` — defect 1, ~2x bloat and ~47x slower.
+12. `psql -f drizzle-pg/0002_indexes.sql` — primary keys, the labelings foreign
+    key, and all secondary indexes, all `CONCURRENTLY`. No 30-second limit
+    here; that is one of the four reasons for leaving D1.
+13. `ANALYZE`, then check against the Phase 0 measurement: expect **9.66 GB
+    heap / 5.07 GB indexes / 14.73 GB total** and `n_dead_tup = 0` everywhere.
+    Dead tuples mean something did an `UPDATE` it should not have.
+14. Verify `seq` before trusting pagination:
+
+    ```sql
+    SELECT n, count(*), count(DISTINCT seq), min(seq), max(seq) FROM quivers GROUP BY n;
+    ```
+
+    Every rank must satisfy `count = count(distinct) = max` and `min = 1`.
 
 ### Phase 3 — the Worker  (still not serving Postgres)
 

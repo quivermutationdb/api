@@ -21,12 +21,18 @@
 --     exceed int4). Coerce with Number() on read -- Postgres returns bigint as
 --     a string.
 --
--- Indexes are NOT created here. Load with COPY first, then populate seq, then
--- CREATE INDEX CONCURRENTLY (0002_indexes.sql). That ordering is one of the
--- four reasons for leaving D1.
+-- NO indexes here, INCLUDING PRIMARY KEYS. Load into a bare heap, then add
+-- every index in 0002_indexes.sql.
+--
+-- Measured: leaving only the primary keys in place during the 42.5 M-row rank-6
+-- insert bloated quivers_pkey from 1,969 MB to 3,287 MB -- 1.67x, from B-tree
+-- page splits -- and REINDEX afterwards reclaimed 1.40 GB across the three
+-- tables. A primary key is an index; it costs the same as any other to
+-- maintain during a bulk load. rank_stats, class_nicknames and downloads keep
+-- their keys inline: they are tiny and never bulk-loaded.
 
 CREATE TABLE mutation_classes (
-  id                          text COLLATE "C" PRIMARY KEY,
+  id                          text COLLATE "C" NOT NULL,
   n                           integer NOT NULL,
   canonical_matrix            text    NOT NULL,
   canonical_quiver_id         text COLLATE "C",
@@ -52,7 +58,7 @@ CREATE TABLE mutation_classes (
 );
 
 CREATE TABLE quivers (
-  id                    text COLLATE "C" PRIMARY KEY,
+  id                    text COLLATE "C" NOT NULL,
   n                     integer NOT NULL,
   exchange_matrix       text    NOT NULL,
   mutation_class_id     text COLLATE "C",          -- no FK: see schema.ts
@@ -70,12 +76,10 @@ CREATE TABLE quivers (
 );
 
 CREATE TABLE labelings (
-  mutation_class_id text COLLATE "C" NOT NULL
-    REFERENCES mutation_classes(id) ON DELETE CASCADE,
+  mutation_class_id text COLLATE "C" NOT NULL,   -- FK added in 0002
   ord               integer NOT NULL,
   qmd_id            text COLLATE "C" NOT NULL,
-  matrix            text    NOT NULL,
-  PRIMARY KEY (mutation_class_id, ord)
+  matrix            text    NOT NULL
 );
 
 CREATE TABLE rank_stats (
