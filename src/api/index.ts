@@ -19,7 +19,7 @@ import { cors } from "hono/cors";
 import { rankStats } from "../db/schema";
 import { mainDb } from "../db/shard";
 import { classesRoutes } from "./classes";
-import { BadRequest } from "./errors";
+import { BadRequest, Unavailable } from "./errors";
 import { exportRoutes } from "./export";
 import { lookupRoutes } from "./lookup";
 import { nicknamesRoutes } from "./nicknames";
@@ -43,6 +43,11 @@ api.use("*", async (c, next) => {
 // Bad query params (unparseable ints/bools, unknown sort, bad cursor) -> 400.
 api.onError((err, c) => {
   if (err instanceof BadRequest) return c.json({ detail: err.message }, 400);
+  if (err instanceof Unavailable) {
+    console.error(err);
+    c.header("Retry-After", String(err.retryAfter));
+    return c.json({ detail: err.message }, 503);
+  }
   console.error(err);
   return c.json({ detail: "Internal server error" }, 500);
 });

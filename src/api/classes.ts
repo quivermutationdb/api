@@ -133,10 +133,10 @@ export async function listClasses(env: Env, p: ClassListParams) {
   const total = onlyRank
     ? (await mainDb(env).select().from(rankStats)
         .where(p.rank !== undefined ? eq(rankStats.n, p.rank) : undefined))
-        .reduce((a, r) => a + r.classCount, 0)
+        .reduce((a, r) => a + Number(r.classCount), 0)
     : (await Promise.all(shards.map((s) => dbOf(env, s).select({ n: sql<number>`count(*)` }).from(mc)
         .leftJoin(nick, eq(nick.mcId, mc.id)).where(where))))
-        .reduce((a, r) => a + (r[0]?.n ?? 0), 0);
+        .reduce((a, r) => a + Number(r[0]?.n ?? 0), 0);   // bigint arrives as a string
 
   const keyOf = (r: ClassRow): Key => cols.map((c) => c === mc.id ? r.id : c === mc.n ? r.n
     : c === mc.classSize ? r.classSize : c === mc.distinctQuiverCount ? r.distinctQuiverCount

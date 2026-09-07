@@ -240,9 +240,13 @@ async function totalsFor(env: Env, f: ListFilters, where: SQL | undefined) {
   if (onlyRankFilter(f)) {
     const rows = await mainDb(env).select().from(rankStats)
       .where(f.rank !== undefined ? eq(rankStats.n, f.rank) : undefined);
+    // Number(): Postgres returns bigint (and any widened counter) as a STRING to
+    // avoid precision loss, so `a + r.quiverCount` would concatenate. The
+    // sql<number> annotations here are compile-time only -- TypeScript cannot
+    // catch this, and the result is a plausible-looking wrong total.
     return {
-      distinct: rows.reduce((a, r) => a + r.quiverCount, 0),
-      labeled: rows.reduce((a, r) => a + r.labeledQuiverCount, 0),
+      distinct: rows.reduce((a, r) => a + Number(r.quiverCount), 0),
+      labeled: rows.reduce((a, r) => a + Number(r.labeledQuiverCount), 0),
     };
   }
   const per = await Promise.all(shardsForRank(f.rank).map((s) => dbOf(env, s)
@@ -250,8 +254,8 @@ async function totalsFor(env: Env, f: ListFilters, where: SQL | undefined) {
     .from(q).leftJoin(mc, eq(q.mutationClassId, mc.id)).leftJoin(nick, eq(nick.mcId, mc.id))
     .where(where)));
   return {
-    distinct: per.reduce((a, r) => a + (r[0]?.distinct ?? 0), 0),
-    labeled: per.reduce((a, r) => a + (r[0]?.labeled ?? 0), 0),
+    distinct: per.reduce((a, r) => a + Number(r[0]?.distinct ?? 0), 0),
+    labeled: per.reduce((a, r) => a + Number(r[0]?.labeled ?? 0), 0),
   };
 }
 
@@ -260,20 +264,27 @@ export async function listQuivers(env: Env, p: ListParams) {
   const sortKey = parseSort(p.sort);
   const dir = parseDir(p.dir);
   const where = conds.length ? and(...conds) : undefined;
-  const totals = await totalsFor(env, p.filters, where);
   const shards = shardsForRank(p.filters.rank);
 
+  // Validate before starting any query, so no promise is left dangling on throw.
+  if (p.scope === "labelings" && (sortKey !== "num_vertices" || dir !== "asc")) {
+    throw new BadRequest("scope=labelings supports only the default sort (num_vertices asc)");
+  }
+
+  // Started here, awaited with the page read below. Whenever the filter is not
+  // rank-only, totalsFor falls back to a real count(*) over two left joins;
+  // awaiting it up front put that scan on the critical path of every list
+  // response instead of running it alongside the page.
+  const totalsP = totalsFor(env, p.filters, where);
+
   if (p.scope === "labelings") {
-    if (sortKey !== "num_vertices" || dir !== "asc") {
-      throw new BadRequest("scope=labelings supports only the default sort (num_vertices asc)");
-    }
-    const r = await listLabelings(env, shards, conds, p);
+    const [totals, r] = await Promise.all([totalsP, listLabelings(env, shards, conds, p)]);
     return { items: r.items, total: totals.labeled, distinct_total: totals.distinct,
              labeled_total: totals.labeled, next_cursor: r.next_cursor };
   }
 
   const { cols, dirs } = sortColumns(sortKey, dir);
-  const r = await mergeShards<ListRow>({
+  const [totals, r] = await Promise.all([totalsP, mergeShards<ListRow>({
     shardKeys: shards.map((s) => s.key),
     dirs,
     keyOf: (row) => cols.map((c) => keyValue(row, c)),
@@ -281,7 +292,7 @@ export async function listQuivers(env: Env, p: ListParams) {
       .where(after ? and(where, afterKey(cols, dirs, after)) : where)
       .orderBy(...orderBy(cols, dirs)).limit(limit)) as ListRow[],
     limit: p.limit, offset: p.offset, cursor: p.cursor,
-  });
+  })]);
   return {
     items: r.items.map((row) => quiverListItem(row)),
     total: totals.distinct,

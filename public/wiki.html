@@ -594,6 +594,12 @@ def has_known_non_ma_subquiver(members, known_false):
         leave a quiver whose mutation class still satisfies the condition. Every arrow at a source
         or a sink is a <a href="#local-acyclicity">covering pair</a>, so both are tried; the
         verdict is therefore unchanged if every arrow of the quiver is reversed.</p>
+        <p>Restricting the search to sources and sinks is not merely convenient, it is
+        <em>sufficient</em>: no Banff quiver is missed by considering only covering pairs at a
+        source or a sink <a href="#references">[Jac26]</a>. This is what licenses a definite
+        <i>false</i>. The weaker observation above — that such arrows are covering pairs — would
+        only justify a definite <i>true</i>, since covering pairs also occur at neither (an arrow
+        bridging two disjoint cycles is one).</p>
         <p>The search runs over the mutation class, so a class passes if <em>any</em> of its
         members does.</p>
         <pre class="code-block"><code>def check_condition(q, kind):           # kind in {"banff", "louise", "p_prime"}
@@ -755,6 +761,7 @@ def cond_class(q, kind):                # does any quiver in the class satisfy i
           <li><b>[FZ03]</b> S. Fomin, A. Zelevinsky, <i>Cluster algebras II: Finite type classification</i>, Invent. Math. <b>154</b> (2003), no. 1, 63–121. <a href="https://arxiv.org/abs/math/0208229">arXiv:math/0208229</a>, <a href="https://doi.org/10.1007/s00222-003-0302-y">doi:10.1007/s00222-003-0302-y</a></li>
           <li><b>[Gab72]</b> P. Gabriel, <i>Unzerlegbare Darstellungen I</i>, Manuscripta Math. <b>6</b> (1972), 71–103; Berichtigung, ibid. 309. <a href="https://doi.org/10.1007/BF01298413">doi:10.1007/BF01298413</a></li>
           <li><b>[HP73]</b> F. Harary, E. M. Palmer, <i>Graphical Enumeration</i>, Academic Press, New York, 1973.</li>
+          <li><b>[Jac26]</b> B. Jackson, <i>Answering two OPAC problems involving Banff quivers</i>, Algebraic Combinatorics. <a href="https://doi.org/10.5802/alco.352">doi:10.5802/alco.352</a></li>
           <li><b>[LS22]</b> T. Lam, D. E. Speyer, <i>Cohomology of cluster varieties, I: Locally acyclic case</i>, Algebra Number Theory <b>16</b> (2022), no. 1, 179–230. <a href="https://arxiv.org/abs/1604.06843">arXiv:1604.06843</a>, <a href="https://doi.org/10.2140/ant.2022.16.179">doi:10.2140/ant.2022.16.179</a></li>
           <li><b>[Mul13]</b> G. Muller, <i>Locally acyclic cluster algebras</i>, Adv. Math. <b>233</b> (2013), no. 1, 207–247. <a href="https://arxiv.org/abs/1111.4468">arXiv:1111.4468</a>, <a href="https://doi.org/10.1016/j.aim.2012.10.002">doi:10.1016/j.aim.2012.10.002</a></li>
           <li><b>[Naz73]</b> L. A. Nazarova, <i>Representations of quivers of infinite type</i>, Izv. Akad. Nauk SSSR Ser. Mat. <b>37</b> (1973), 752–791; English transl., Math. USSR-Izv. <b>7</b> (1973), no. 4, 749–792. <a href="https://doi.org/10.1070/IM1973v007n04ABEH001975">doi:10.1070/IM1973v007n04ABEH001975</a></li>

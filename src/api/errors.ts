@@ -1,6 +1,22 @@
 /** Thrown for bad query params; the API router turns it into a 400 {detail}. */
 export class BadRequest extends Error {}
 
+/**
+ * Thrown when the database is reachable but cannot serve the request right now
+ * -- a connection-pool timeout, or the instance refusing new connections. The
+ * router turns it into a 503 with Retry-After.
+ *
+ * D1 has no connection pool, so nothing raises this today. It exists because a
+ * pooled Postgres behind Hyperdrive does, and without it pool exhaustion
+ * surfaces as an untyped 500 that tells a client (and an agent following
+ * /llms.txt) to give up rather than retry.
+ */
+export class Unavailable extends Error {
+  constructor(message = "Database temporarily unavailable", readonly retryAfter = 2) {
+    super(message);
+  }
+}
+
 export function parseBool(name: string, v: string | undefined): boolean | undefined {
   if (v === undefined || v === "") return undefined;
   const s = v.toLowerCase();

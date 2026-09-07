@@ -65,8 +65,17 @@ function strictlyAfter(col: KeyCol, dir: Dir, v: string | number | null): SQL {
   return v === null ? sql`0` : or(sql`${col} < ${v}`, isNull(col))!;
 }
 
+/**
+ * NULL placement is stated explicitly rather than left to the engine. SQLite
+ * puts NULLs first ascending and last descending; Postgres does the exact
+ * opposite, so a bare `asc`/`desc` would silently reorder every page over a
+ * nullable column (class_size, dynkin_type, mutation_finite). `afterKey` and
+ * `compareKeys` below already encode SQLite's placement, so pinning it here
+ * keeps all three in agreement on either engine -- do not "simplify" this back.
+ */
 export function orderBy(columns: KeyCol[], dirs: Dir[]): SQL[] {
-  return columns.map((c, i) => (dirs[i] === "desc" ? sql`${c} desc` : sql`${c} asc`));
+  return columns.map((c, i) =>
+    (dirs[i] === "desc" ? sql`${c} desc nulls last` : sql`${c} asc nulls first`));
 }
 
 /** Compare two keys under `dirs` (SQLite NULL ordering); used to merge shard pages. */
