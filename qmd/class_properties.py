@@ -37,6 +37,14 @@ def la_bounds(is_open: bool) -> dict:
 # mutation-acyclic, the whole class is not mutation-acyclic.  The base case is
 # the Markov quiver (rank 3, its own closed class -> proved False), and
 # rank-ordered resolution lets that propagate upward.
+#
+# Heredity is NOT the easy direction. Mutation-FINITENESS is hereditary because
+# restriction commutes with mutation at vertices of the subquiver; for
+# mutation-ACYCLICITY the witnessing sequence may mutate outside the subquiver,
+# where it does not commute. The result is a theorem, not an observation:
+#
+#   M. Warkentin, "Subquivers of mutation-acyclic quivers are mutation-acyclic",
+#   arXiv:1102.3382 (2011).                                            [War11]
 
 def _delete_vertex(m, k):
     """Induced subquiver obtained by deleting vertex k (rows/cols)."""

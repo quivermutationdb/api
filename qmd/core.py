@@ -53,10 +53,15 @@ Key theorem (orbit uniqueness under shared quivers)
     Both cases raise AssertionError immediately in the pipeline.
 
 Gluing breakdown (tracked in GenerationResult)
-    closed_closed_merges  -- must always be 0 (canonicalization bug if not)
-    closed_open_merges    -- must always be 0 (BFS bug if not)
+    closed_closed_merges  -- structurally 0: that case raises (see below)
+    closed_open_merges    -- structurally 0: that case raises (see below)
     open_open_gluings     -- the only valid case; two partial explorations
                              of the same unbounded class joined together
+
+    The first two are retained as named fields so the invariant is visible and
+    assertable from tests, but the gluing loop raises AssertionError on either
+    case before it could increment them. A non-zero value is unreachable, not
+    merely unexpected.
 
 Gluing algorithm
     Union-Find (disjoint set union) over raw BFS orbits.  Each orbit
@@ -379,10 +384,9 @@ def _bfs_unlabeled(seed: Matrix, bound: int = 2,
             queue.append(cf)
         if at_boundary:
             boundary += 1
-        if truncated and not crossed and len(visited) >= node_cap:
-            # Nothing more may be added; the remaining queue can only add
-            # members, so stop (crossings already seen are recorded).
-            pass
+        # No early exit once the cap is hit: the queue is drained to the end so
+        # a crossing anywhere still turns "truncated" (unknown) into "crossed"
+        # (mutation-infinite). Stopping here would trade a proof for an unknown.
 
     members = sorted(visited)
     qids = [quiver_id(m) for m in members]

@@ -87,6 +87,22 @@ def _is_mutation_acyclic(q: Matrix, ctx: _Ctx) -> Optional[list[int]]:
 # covering pair, so both are tried, and P' likewise deletes a source or a
 # sink. All three searches are therefore symmetric under passing to the
 # opposite quiver (which swaps sources and sinks).
+#
+# WHY RESTRICTING TO SOURCES AND SINKS IS ENOUGH -- and why it is not obvious.
+# The observation above only makes a "true" verdict sound: any covering pair we
+# find is genuine. It does NOT by itself make a "false" verdict sound, because
+# covering pairs exist that sit at neither a source nor a sink (a bridge
+# between two disjoint cycles is one). So a search restricted this way could in
+# principle miss a witness and report a false negative -- which _status reports
+# as a PROOF ("false") whenever nothing was truncated.
+#
+# It is nevertheless sufficient: considering only sources and sinks when looking
+# for covering pairs loses no Banff quiver. That is a theorem, not a shortcut:
+#
+#   B. Jackson, "Answering two OPAC problems involving Banff quivers".
+#
+# Do not weaken "false" to "unknown" on the strength of the bridge example
+# above; the theorem is what licenses it.
 
 def _sources(q: Matrix) -> list[int]:
     n = len(q)
