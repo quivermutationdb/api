@@ -145,7 +145,7 @@ validates (CI runs it); `--sql dist/nicknames.sql` renders the table;
 
 ## Releasing data to production
 
-Order matters — the Worker code assumes schema v2 and the data:
+Order matters — the Worker code assumes schema v3 and the data:
 
 ```bash
 scripts/release-data.sh dist/d1     # migrations → rank parts → nicknames → deploy
