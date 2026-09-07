@@ -581,8 +581,14 @@ def finite_class_seeds(con, n: int, log) -> list:
             continue
         seen |= set(orbit.qid_set)
         seeds.append(m)
-    log(f"    {len(seeds)} mutation-finite class(es): {from_cell} found in the cell, "
-        f"{len(seeds) - from_cell} constructed")
+    # "in scratch", not "found in the cell": this stage APPENDS its complete-class
+    # members to the quivers table, so on a re-run the classes an earlier run
+    # constructed are already sitting there and are counted here. Rank 8 went
+    # 2/16 -> 18/1 -> 19/0 across three runs of the same sample. Reporting that
+    # as "found in the cell" would credit a 250k-of-572,849,763 draw with
+    # discoveries it did not make.
+    log(f"    {len(seeds)} mutation-finite class(es): {from_cell} already in scratch "
+        f"(cell sample + any earlier run of this stage), {len(seeds) - from_cell} newly constructed")
     return seeds
 
 
