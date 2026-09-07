@@ -99,8 +99,8 @@ def _is_mutation_acyclic(q: Matrix, ctx: _Ctx) -> Optional[list[int]]:
 # It is nevertheless sufficient: considering only sources and sinks when looking
 # for covering pairs loses no Banff quiver. That is a theorem, not a shortcut:
 #
-#   B. Jackson, "Answering two OPAC problems involving Banff quivers",
-#   Algebraic Combinatorics. doi:10.5802/alco.352                        [Jac26]
+#   T. J. Ervin, B. Jackson, "Answering two OPAC problems involving Banff
+#   quivers", Algebraic Combinatorics (2024). doi:10.5802/alco.352        [EJ24]
 #
 # Do not weaken "false" to "unknown" on the strength of the bridge example
 # above; the theorem is what licenses it.
