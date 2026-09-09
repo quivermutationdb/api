@@ -239,8 +239,21 @@ the browse page and a timeout. **PS-40 is the steady tier.**
 
 ## Load-path defects found by doing it  (all fixed)
 
-Five, none of which are visible on paper. Two would have produced a database
-that loads cleanly and serves wrong results.
+Six, none of which are visible on paper. Two would have produced a database
+that loads cleanly and serves wrong results, and the sixth could only be found
+by pointing the load at something that is not localhost.
+
+0. **`COPY` was server-side, so the load could never have reached PlanetScale.**
+   `pg-export.py` emitted SQL `COPY t (...) FROM '/abs/path'`, which makes the
+   *server* open that path, and under `--gzip` it emitted
+   `COPY ... FROM PROGRAM 'gzip -dc ...'`, which makes the server run a shell
+   command. Both need superuser and both assume the data is on the database
+   host. That is true of a local Postgres — the server is your laptop, which is
+   exactly why the Phase 0 rehearsal passed — and false of every managed
+   provider. Replaced with psql's `\copy` client meta-command, which reads the
+   file here and streams it as `COPY ... FROM STDIN` with no special grant.
+   Verified 2026-09-09 by loading the 692-row dev dataset over TCP into a fresh
+   database: 0001 → `\copy` → 0002 → verify, `seq` gapless per rank.
 
 1. **`UPDATE ... SET seq = row_number()` bloats every table ~2x.** MVCC writes
    a new tuple version per update, so it leaves exactly one dead tuple per row:
@@ -451,6 +464,20 @@ psql -d qmd -c ANALYZE
 8. Note the Hyperdrive config id and the connection string.
 
 ### Phase 2 — load  (into a bare heap; every index afterwards)
+
+**Phase 2 needs the direct PlanetScale connection string, not Hyperdrive.**
+Hyperdrive is a Worker binding: `env.HYPERDRIVE.connectionString` exists only
+inside a running Worker and points at Cloudflare's pooler. `psql` cannot use
+it. The Hyperdrive id (`3102c79867ae4311b621240f7f200bbe`, created 2026-09-09)
+is wired into `wrangler.jsonc` for Phase 3 and is not needed before then.
+
+**Budget for the upload.** The rank-6 TSV alone is 5.1 GB and the whole census
+is ~5.5 GB, all of which crosses the wire from the machine running `psql`.
+`--gzip` shrinks the files on disk but not on the wire — `\copy` decompresses
+client-side and the Postgres protocol does not compress — so plan on a wired
+connection and a run measured in tens of minutes. Load rank by rank: each rank
+is a separate export directory, so a dropped connection costs one rank, not
+the census.
 
 9. `psql -f drizzle-pg/0001_init.sql`. This creates **no indexes at all, not
     even primary keys** — see defect 5. Do not "helpfully" add them back.

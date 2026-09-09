@@ -67,6 +67,26 @@
     }
   ],
 
+  // PlanetScale Postgres, reached through Hyperdrive (pooling + edge cache).
+  // Created from the Cloudflare dashboard 2026-09-09 so it bills to the ICARM
+  // Cloudflare account; docs/PLANETSCALE.md is the migration plan.
+  //
+  // Declared but NOT YET USED: the Worker still reads D1 above. An unused
+  // binding costs nothing at runtime, and having it here means `cf-typegen`
+  // types `env.HYPERDRIVE` for the port (Phase 3). Do not remove the D1
+  // bindings until cutover -- they are the rollback.
+  //
+  // Caching is ON by default (60 s, 1 h max) and is NOT invalidated by writes,
+  // so after a data release the cache serves the previous census until it
+  // expires. Decide deliberately: short max_age, or rotate the config as a
+  // release step (docs/PLANETSCALE.md, "Sticking points").
+  "hyperdrive": [
+    {
+      "binding": "HYPERDRIVE",
+      "id": "3102c79867ae4311b621240f7f200bbe"
+    }
+  ],
+
   "observability": {
     "enabled": true
   }
