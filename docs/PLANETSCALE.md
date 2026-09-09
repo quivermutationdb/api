@@ -5,9 +5,11 @@ yet.** The two blockers are cleared — ranks 7 and 8 are generated and verified
 and the pre-flight code review is done and its safe-on-D1 fixes are landed. The
 live system is still one Worker over D1 exactly as CLAUDE.md describes.
 
-Phase 0 is complete: the footprint is measured, the query latency is measured,
-and the one regression that measurement exposed is fixed in code. Everything
-remaining is a decision or a click, both listed in §"Provisioning runbook".
+**Superseded 2026-09-09: PROVISIONED AND LOADED.** The PS-160 exists, the
+Hyperdrive config exists (`3102c79867ae4311b621240f7f200bbe`, wired into
+`wrangler.jsonc`), and all 50,828,164 rows are loaded, indexed and verified.
+See §"Phase 2 as it actually ran". What remains is Phase 3 (the Worker port),
+Phase 4 (cutover) and Phase 5 (R2) — plus the resize down to PS-40.
 
 Decided 2026-09-01 by Blake. This file is authoritative; the original spec
 artifact <https://claude.ai/code/artifact/8b57ac3a-faf8-4a56-9d48-4831e4e19055>
@@ -236,6 +238,84 @@ Re-measured on the same data, running the exact SQL Drizzle now emits:
 Note the last two: with the partial indexes the *exact* count is also viable
 again, so the cap is a safety net rather than the only thing standing between
 the browse page and a timeout. **PS-40 is the steady tier.**
+
+## Phase 2 as it actually ran  (2026-09-09)
+
+Loaded into PlanetScale Postgres **18.6** (not 17 — the local rehearsal was on
+17.11; nothing we use is version-sensitive). Role `pscale_api_*`: not superuser,
+not the database owner, but `CREATEDB` + `CREATE` on `public`, which is
+everything the load needs.
+
+| phase | wall clock |
+| --- | ---: |
+| ranks 1–5, 7, 8 (1.0 GB) | 15 min |
+| rank 6 upload (5.1 GB, 10 chunks) | 46 min |
+| rank 6 staging → table + seq (server-side) | 12 min |
+| all indexes, `CONCURRENTLY` | 25 min |
+
+**Verified:** counts exact at all 8 ranks (50,828,164 / 327,961 / 457,125 / 21);
+`seq` unique, gapless and reproducing id order at every rank; `rank_stats`
+reconciled against rows actually loaded; `COLLATE "C"` intact on all 7 id
+columns; zero orphan labelings; no invalid indexes; rank-8 finite classes = 19
+with E6^(1,1) at 49 quivers; rank-6 finite = 428 in 13 classes; Markov still not
+mutation-acyclic. Script: `scratchpad/verify.sql` — worth keeping with the repo.
+
+**Footprint held to within 3 % of the Phase 0 projection:** 9,213 MB heap /
+4,902 MB indexes / 14 GB total, against 9.66 / 5.07 / 14.73 GB predicted.
+`quivers_pkey` landed at 1,969 MB, matching the local figure exactly.
+
+### Things only the real load could teach
+
+* **`random_page_cost` is already 1.1 on PlanetScale.** The setting §"Measured
+  query latency" argues for is their default. `0003`'s `ALTER DATABASE` takes
+  its no-op branch (the role is not the owner) — which is what that guard was
+  written for.
+* **The upload is per-stream limited, not bandwidth limited.** One `\copy`
+  sustained 1.1 MB/s; three concurrent sustained 3.62 MB/s aggregate, near
+  linear. **Caveat, honestly:** the driver's `wait -n` is unsupported in this
+  zsh and fell back to `wait`, so the production run degenerated to roughly
+  serial — 46 min rather than the ~20 the measurement implied. Parallelise a
+  future load, but verify the harness actually sustains it.
+* **Chunk the big rank.** 5.1 GB in one `\copy` means a dropped connection at
+  minute 40 costs everything. Ten chunks into one `UNLOGGED` staging table with
+  a per-chunk marker makes it resumable, and costs nothing: `seq` is assigned
+  afterwards by `row_number() OVER (PARTITION BY n ORDER BY id)`, so chunk
+  arrival order is irrelevant by construction.
+* **Rank 6's `rank_stats` row is not in the shard databases.** The stats parts
+  target the main database, so a shard-only load silently leaves `/stats`
+  missing the rank holding 84 % of the census. Load
+  `dist/d1/qmd-n6.stats.001.sql` and `qmd-n6.patch-stats.001.sql` explicitly;
+  the patch recomputes `class_count` from rows actually present, which in one
+  database gives the true 242,981 rather than the hardcoded 242,971.
+* **Do not run `pg_n6b/load.sql` after chunking** — it would re-COPY all 5.1 GB.
+
+### Open: 1,749 dangling rank-8 class references
+
+0.68 % of rank-8 quivers named a `mutation_classes` row that was never written
+(1,740 distinct ids, all mutation-infinite, all `max_edge = 1`). **Pre-existing
+in the generated data** — same 1,749 in the source SQLite and in `dist/d1`.
+Patched at the database with `drizzle-pg/0003_rank8_dangling_class_refs.sql`
+(NULL the reference; `mutation_finite` deliberately untouched — see the file).
+**The exporter-side cause is unresolved and still open**: rank 8 was generated
+by an earlier state of `qmd/d1_export.py`, so today's source does not explain
+it. Regenerating rank 8 should make `0003` a no-op; that is the test.
+
+### Measured on the real PS-160
+
+| query | PS-160 | local (Phase 0b) |
+| --- | ---: | ---: |
+| point lookup by id | **2.3 ms** | — |
+| browse page 1, rank 6 keyset | **2.3 ms** | — |
+| capped count, rank 6 + `is_acyclic` | **20.6 ms** | 11.8 ms |
+| capped count, rank 6 + `is_connected = false` | **0.084 ms** | 0.017 ms |
+| exact count, rank 7 + `is_acyclic` | **23.9 ms** | 651 ms |
+| exact count, rank 6 + `is_acyclic` | 1,334 ms | 413 ms |
+
+Rank 7 beat the local number 27x because that measurement predates the partial
+indexes. **These are PS-160 numbers**: the exact rank-6 count used three
+parallel workers that PS-40's half vCPU will not have, so expect ~4 s there —
+exactly the case `TOTAL_CAP` exists for, and not a path the API takes by
+default.
 
 ## Load-path defects found by doing it  (all fixed)
 
