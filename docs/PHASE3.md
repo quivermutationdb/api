@@ -1,5 +1,12 @@
 # Phase 3: the census build — cells, cost, sharding, unlabeled exploration
 
+> **Historical (D1 era).** Kept as the record of how these decisions were made
+> and why. The system moved to PlanetScale Postgres on 2026-09-09, so the
+> operational commands below (`import-d1.sh`, `migrate-all.sh`,
+> `trim-shard-indexes.sh`, D1 write budgeting) no longer exist or apply. The
+> mathematics, the cell sizes and the generation-scope reasoning are unchanged
+> and still authoritative. Current system: `CLAUDE.md`, `docs/PLANETSCALE.md`.
+
 > Status: **built** (schema v3, pipeline, API, site). Generation runs and the
 > production load are operated by the maintainer (§6). PHASE2.md remains the
 > design of the storage/API foundations; this file records the census plan

@@ -89,14 +89,14 @@ history. This file describes the current system.
 - **Excel export is generated client-side** from CSV (`public/xlsx-lite.js`);
   the Worker serves CSV only (`/api/export`, streamed from paginated reads).
 
-## Data pipeline (offline → D1)
+## Data pipeline (offline → Postgres)
 
 ```bash
 python scripts/populate.py --count-only --max-vertices 10 --bound 2   # exact (connected) cell sizes first!
 python scripts/populate.py --export-d1 dist/d1 --ranks 4 --bound 10 --node-cap 100 --workers 8
 python scripts/populate.py --export-d1 dist/d1 --ranks 8 --bound 1 --generator sample --sample 1000000 --node-cap 100 --workers 8
 scripts/run-rank6.sh   # rank 6 via qmd/bigcell.py; resumable, detached, native arm64 python
-scripts/import-d1.sh dist/d1 --remote          # parts in order, ranks ascending, right database per part
+scripts/release-data.sh dist/d1                # parts -> SQLite -> COPY -> Postgres -> deploy
 ```
 
 The agreed cells and the cost model are in docs/PHASE3.md §1/§3. Seeds
@@ -133,12 +133,15 @@ need an entry in `data/nicknames.json`.
 Seeds come from `qmd/census.py`: **orderly generation** (exact census of the
 cell (n, bound); parallel) or **sampling** for cells that are not finite jobs
 (see the size table in docs/PHASE2.md §1 — anything ≳ 10⁷ classes). Parallel
-runs are bit-identical to serial ones. Never raise `--node-cap` above what
-D1 can hold: labelings rows ≈ classes × cap.
+runs are bit-identical to serial ones. `--node-cap` bounds the labelings
+table: rows ≈ classes × cap.
 
 A rank is exported as ordered parts `qmd-n{k}.001.sql, .002.sql, …` (statements
-cut at 90 KB, parts at 64 MB — D1 limits); part 001 deletes the rank first, so
-a rank is idempotent as a whole but must be imported part-by-part in order.
+cut at 90 KB, parts at 64 MB). These sizes were D1's limits and are now just
+the intermediate format's: `scripts/pg-load-local.sh` and `release-data.sh`
+replay the parts into one SQLite, then `scripts/pg-export.py` renders Postgres
+COPY text. Part 001 deletes the rank first, so a rank is idempotent as a whole
+but must be replayed part-by-part in order.
 `manifest.json` records every part's sha256 and the sha256 of each lower-rank
 `acyclicity-n{j}.json` checkpoint the rank consumed, so regenerating rank j
 invalidates every rank above it. `--node-cap` stops a class BFS after C
@@ -158,20 +161,26 @@ validates (CI runs it); `--sql dist/nicknames.sql` renders the table;
 
 ## Releasing data to production
 
-Order matters — the Worker code assumes schema v3 and the data:
+Order matters — the Worker is deployed LAST, after the data it expects:
 
 ```bash
-scripts/release-data.sh dist/d1     # migrations → rank parts → nicknames → deploy
+set -a && . ./.pgenv && set +a      # Postgres connection (NOT .env -- see below)
+set -a && . ./.env   && set +a      # CLOUDFLARE_API_TOKEN, for the deploy
+scripts/release-data.sh dist/d1     # verify → schema → data → indexes →
+                                    # patches+nicknames → verify → deploy
 ```
+
+`release-data.sh` is a FULL REBUILD (`0001_init.sql` starts from nothing), not
+an incremental update. Adding one rank to a live database is a different job:
+follow docs/PLANETSCALE.md, and chunk anything the size of rank 6.
 
 ## Development
 
 ```bash
 npm install && npm run cf-typegen      # deps + generate Env types
-npm run db:migrate:local               # schema into local D1
-python scripts/populate.py --export-d1 dist/d1   # generate dataset
-scripts/import-d1.sh dist/d1           # load it (parts in order)
-python scripts/nicknames.py --sql dist/nicknames.sql && npx wrangler d1 execute qmd --local --file=dist/nicknames.sql
+createdb qmd                           # a local Postgres 17+ to develop against
+npm run db:load:local                  # generate the dev cell + load it (one step)
+npm run db:verify                      # structural checks on what just loaded
 npm run dev                            # http://127.0.0.1:8787
 npm run typecheck
 npm run test:api                       # ~80 API assertions against wrangler dev
@@ -182,7 +191,18 @@ npm run deploy                         # production (needs CLOUDFLARE_API_TOKEN)
 ```
 
 CI (`.github/workflows/ci.yml`) runs pytest, typecheck, and the API smoke
-tests against a freshly generated local D1 on every push and PR.
+tests against a Postgres service container loaded by `pg-load-local.sh` — the
+same script and the same load path a release uses, so CI cannot pass against a
+path production does not take.
+
+**Connection settings live in `.pgenv`, not `.env`.** Wrangler auto-loads
+`.env` into the Worker's `process.env`, where the `pg` driver reads
+`PGSSLNEGOTIATION`/`PGSSLMODE` and fails with "sslnegotiation=direct requires
+SSL to be enabled". `.env` keeps `CLOUDFLARE_API_TOKEN` only. `wrangler dev`
+reaches the database through the Hyperdrive binding's `localConnectionString`
+(or `CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE`), which
+**must include a password** — Miniflare rejects a passwordless one even when
+the server uses trust auth.
 
 **IDs are frozen.** `tests/golden/ids-n4.json` pins every published
 `Q.*`/`MC.*` id (and class membership/sizes). A change that re-keys the
@@ -190,22 +210,34 @@ database is a breaking change for citations; if it is ever intended, regenerate
 the golden file deliberately (`python tests/test_golden_ids.py --regenerate`)
 and ship an alias table for the old ids.
 
-Use a **scoped API token** (Workers + D1 edit on this account only); never a
-global key — this is a shared organizational Cloudflare account (ICARM).
+Use a **scoped API token** (Workers edit on this account only); never a global
+key — this is a shared organizational Cloudflare account (ICARM). The token is
+deliberately too narrow to read account membership or Hyperdrive configs; that
+is working as intended, not something to widen.
 
 ## Adding a new invariant / property
 
 Keep these in sync:
 
-1. `src/db/schema.ts` — add the column (+ index if filterable), then
-   `npm run db:generate` and apply the migration locally and remotely.
+1. **Both schema files, and the hand-written DDL.**
+   `src/db/schema.ts` (Postgres, what the Worker serves) *and*
+   `drizzle-pg/0001_init.sql` (authoritative DDL — add the column there by
+   hand; `drizzle-kit` must never be pointed at the Postgres schema), plus an
+   index in `drizzle-pg/0002_indexes.sql` if it is filterable. Then
+   `src/db/schema.sqlite.ts` + `npm run db:generate:sqlite`, because the
+   offline pipeline's intermediate carries the column too. A type shared by
+   both belongs in `src/db/types.ts`.
 2. `qmd/invariants.py` or `qmd/local_acyclicity.py` — compute it.
 3. `qmd/d1_export.py` — write it (build_rank_rows + the column list in
-   render_rank_sql); regenerate and re-import the dataset.
+   render_rank_sql) *and* `scripts/pg-export.py` picks the column list up from
+   there, so it needs no edit; regenerate and reload the dataset.
 4. Worker API — surface it: list/detail serializers in `src/api/quivers.ts`
    / `src/api/classes.ts`, `EXPORT_COLUMNS` in `src/api/export.ts` (append,
    never reorder), the OpenAPI schemas in `src/api/openapi.ts`, and the MCP
-   tool descriptions in `src/mcp.ts`. Extend `scripts/api-smoke.mjs`.
+   tool descriptions in `src/mcp.ts`. Extend `scripts/api-smoke.mjs`. If it is
+   filterable, benchmark the filtered count on rank 6 before shipping: an
+   unindexed filter there scans a 9 GB heap (see `TOTAL_CAP` in
+   `src/api/quivers.ts` and docs/PLANETSCALE.md).
 5. `public/` — show it on the quiver/class page and (optionally) as a
    Browse/Search column; add a `<section id="...">` definition in
    `public/wiki.html` (its section ids are the deep-link anchors every

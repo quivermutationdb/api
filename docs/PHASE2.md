@@ -1,5 +1,12 @@
 # Phase 2 design: n ≤ 10, |b_ij| ≤ 10, agents, nicknames
 
+> **Historical (D1 era).** Kept as the record of how these decisions were made
+> and why. The system moved to PlanetScale Postgres on 2026-09-09, so the
+> operational commands below (`import-d1.sh`, `migrate-all.sh`,
+> `trim-shard-indexes.sh`, D1 write budgeting) no longer exist or apply. The
+> mathematics, the cell sizes and the generation-scope reasoning are unchanged
+> and still authoritative. Current system: `CLAUDE.md`, `docs/PLANETSCALE.md`.
+
 > Status: **implemented** (schema v2, pipeline, API, site, census generation). `docs/SCALING.md` is the original audit; this file records what
 > was decided and built.
 
