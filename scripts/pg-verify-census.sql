@@ -33,3 +33,7 @@ FROM quivers JOIN (VALUES (1,1),(2,10),(3,1550),(4,3574495),(5,2359306),
                           (6,42514454),(7,2120315),(8,258033)) AS e(rn, expected)
   ON e.rn = quivers.n
 GROUP BY n, expected ORDER BY n;
+
+\echo '=== every curated nickname resolves to a real class (must be 0) ==='
+SELECT count(*) AS nicknames_without_class FROM class_nicknames c
+  LEFT JOIN mutation_classes m ON c.mc_id = m.id WHERE m.id IS NULL;

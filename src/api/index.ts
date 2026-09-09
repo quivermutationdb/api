@@ -64,10 +64,27 @@ api.use("*", async (c, next) => {
     throw new Unavailable("database is not reachable");
   }
   c.env = withDb(c.env, pool);
+  const close = () => pool.end().catch((e) => console.error("pool.end failed", e));
   try {
     await next();
-  } finally {
-    c.executionCtx.waitUntil(pool.end().catch((e) => console.error("pool.end failed", e)));
+  } catch (e) {
+    c.executionCtx.waitUntil(close());
+    throw e;
+  }
+  // The pool must outlive the RESPONSE BODY, not the handler. /export and
+  // /export.ndjson return a stream that is still pulling pages after the
+  // handler has returned, so closing here on handler exit killed the export
+  // mid-flight: the first page landed, the second failed with "Failed query",
+  // and the client got a CSV containing nothing but its header row. Pipe the
+  // body through a pass-through and close when that drains. A buffered JSON
+  // response drains immediately, so this costs nothing on the common path.
+  const body = c.res.body;
+  if (body) {
+    const { readable, writable } = new TransformStream();
+    c.executionCtx.waitUntil(body.pipeTo(writable).finally(close));
+    c.res = new Response(readable, c.res);
+  } else {
+    c.executionCtx.waitUntil(close());
   }
 });
 

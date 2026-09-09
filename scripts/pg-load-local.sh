@@ -25,6 +25,26 @@ OUT="${OUT:-dist/dev-pg}"
 SQLITE="${SQLITE:-dist/qmd-dev.sqlite}"
 PSQL=(psql -X -v ON_ERROR_STOP=1 -q)
 
+# REFUSE TO RUN AGAINST ANYTHING BUT A LOCAL DATABASE.
+# This script drops and recreates the public schema. .pgenv points at the
+# PRODUCTION PlanetScale database, and sourcing it before running this -- the
+# obvious muscle memory, since every other psql command here needs it -- would
+# destroy the live census. Localhost only unless the caller says otherwise in
+# so many words.
+HOST_CHECK="${PGHOST:-localhost}"
+case "$HOST_CHECK" in
+  localhost|127.0.0.1|::1|/*) ;;
+  *)
+    if [ "${I_KNOW_THIS_IS_NOT_LOCAL:-}" != "yes" ]; then
+      echo "REFUSING: PGHOST=$HOST_CHECK is not local, and this script runs" >&2
+      echo "  DROP SCHEMA public CASCADE. If you are certain, re-run with" >&2
+      echo "  I_KNOW_THIS_IS_NOT_LOCAL=yes" >&2
+      exit 1
+    fi
+    echo "!! running against NON-LOCAL host $HOST_CHECK on an explicit override" >&2
+    ;;
+esac
+
 echo "==> generating the dev dataset into $D1"
 rm -rf "$D1"
 python scripts/populate.py --export-d1 "$D1"

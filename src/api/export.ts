@@ -248,7 +248,9 @@ async function handleNdjson(c: Context<{ Bindings: Env }>) {
   const filters = parseFilters((k) => c.req.query(k));
   const limitParam = parseInteger("limit", c.req.query("limit"));
   const max = limitParam === undefined ? null : Math.min(Math.max(limitParam, 1), 5000);
-  const arity = scope === "labelings" ? 4 : 3;
+  // [n, seq] / [n, seq, ord]. Was 3 / 4 when the key carried a leading shard
+  // index; the shards are gone, so both shapes lost exactly one element.
+  const arity = scope === "labelings" ? 3 : 2;
   const start = decodeCursor(c.req.query("cursor"), arity);
   if (start && typeof start[0] !== "number") throw new BadRequest("invalid cursor");
 

@@ -32,7 +32,11 @@ SELECT count(*) AS orphan_labelings FROM labelings l
 SELECT count(*) AS orphan_quiver_class_refs FROM quivers q
   LEFT JOIN mutation_classes m ON q.mutation_class_id = m.id
   WHERE q.mutation_class_id IS NOT NULL AND m.id IS NULL;
-SELECT count(*) AS nicknames_without_class FROM class_nicknames c
+-- INFORMATIONAL, not an assertion. data/nicknames.json names classes across
+-- ranks 3-8, so on a partial dataset (CI loads ranks 1-4) most of them have no
+-- class row and this is legitimately nonzero -- 16 on the dev cell. It must be
+-- 0 on a full load, which is asserted in scripts/pg-verify-census.sql.
+SELECT count(*) AS nicknames_without_class_informational FROM class_nicknames c
   LEFT JOIN mutation_classes m ON c.mc_id = m.id WHERE m.id IS NULL;
 
 \echo '=== C collation survived the load (must be 7) ==='

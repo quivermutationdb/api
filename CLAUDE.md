@@ -6,47 +6,60 @@ This is research infrastructure: treat the public API as versioned-by-
 politeness (keep response shapes stable), and keep CC-BY-4.0 attribution
 intact.
 
-The whole system runs on Cloudflare (one Worker + one D1 database); the
-earlier hosting stack was decommissioned in August 2026 and survives only in
-git history. This file describes the current system.
+The whole system runs on Cloudflare: one Worker serving the site and the API,
+over **one PlanetScale Postgres database reached through Hyperdrive**. Earlier
+stacks (Neon + Render, then D1) are decommissioned and survive only in git
+history. This file describes the current system.
 
-> **Planned move off D1 — decided 2026-09-01, NOT started.** The next platform
-> is PlanetScale Postgres (PS-40) with the bulk census in R2, provisioned from
-> the Cloudflare dashboard so it bills to the Cloudflare account. Everything
-> below still describes reality; nothing has been provisioned. **Do not begin
-> the migration until ranks 7 and 8 have finished generating** — their row
-> counts are inputs to the sizing. Plan, sticking points and the resume
-> checklist: `docs/PLANETSCALE.md`.
+> **Moved off D1 on 2026-09-09.** The API serves PlanetScale Postgres (PS-40,
+> provisioned through the Cloudflare dashboard so it bills to the ICARM
+> Cloudflare account) via the Hyperdrive binding. All 50,828,164 rows across
+> ranks 1-8 are loaded, indexed and verified. The five D1 databases still
+> exist, unreferenced, as the rollback; deleting them is a human-approved
+> action. Record of the migration, the measurements behind it and the load
+> defects it exposed: `docs/PLANETSCALE.md`.
 
 ## Architecture
 
 - **One Cloudflare Worker** (`qmd`, wrangler.jsonc) serves both the API
-  (mounted at `/api/*`; Hono + Drizzle over D1) and the static frontend
+  (mounted at `/api/*`; Hono + Drizzle over Postgres) and the static frontend
   (Workers Static Assets from `public/`). Same origin, no CORS. Production
   hostnames: quivermutationdb.org + www (Custom Domains, declared in
   wrangler.jsonc `routes`).
-- **One D1 database** (`qmd`, bound as `DB`). All DB access goes through the
-  routing seam `shardFor(n)` in `src/db/shard.ts` — today it returns the one
-  bound DB; future per-`n` shards change only that module. IDs encode the
-  rank (`Q.n4.{sha256[:16]}`, `MC.n4.{sha256[:16]}`), so point lookups route
-  by prefix.
+- **One Postgres database** (PlanetScale, bound as `HYPERDRIVE`). All DB
+  access goes through the routing seam `shardFor(n)` in `src/db/shard.ts` —
+  today a one-liner returning the single handle; a future per-`n` split
+  changes only that module. IDs encode the rank (`Q.n4.{sha256[:16]}`,
+  `MC.n4.{sha256[:16]}`), so a malformed id is rejected before a query.
+- **One `pg` Pool per request**, on a shallow copy of `env` (never a mutation:
+  `env` is shared across an isolate), closed with `ctx.waitUntil` so a streamed
+  export is not cut off. A Pool and not a Client: `pg`'s Client allows exactly
+  one query at a time and the list handlers deliberately run a count alongside
+  a page read. PS-40 allows **25 connections**; exhaustion surfaces as the
+  typed `Unavailable` → 503 with `Retry-After`, never an untyped 500.
 - **Schema v3** (`src/db/schema.ts`, migrations in `drizzle/`; design in
   `docs/PHASE2.md` + `docs/PHASE3.md`): skinny browse tables `quivers` and
   `mutation_classes`; matrices stored in the compact upper-triangular
-  encoding (`qmd/encoding.py` ↔ `src/db/matrix.ts`); rowid-based indexes
-  (rows are inserted in id order per rank, so `(n, rowid)` is id order and
-  cursors use rowid); per-quiver `mutation_finite` (three-state, known even
+  encoding (`qmd/encoding.py` ↔ `src/db/matrix.ts`); **`seq`**, an integer
+  assigned at load by `row_number() OVER (PARTITION BY n ORDER BY id)` and
+  verified gapless 1..count per rank, so `(n, seq)` is id order — it is the
+  keyset tiebreak and the random-pick key, replacing SQLite's rowid; per-quiver `mutation_finite` (three-state, known even
   without a class row via Derksen–Owen) and `mutation_class_id` NULL for
   unexplored quivers; **one row per labeled matrix in `labelings`, stored only
   for complete classes with distinct × n! ≤ 200k** (`class_size` NULL
   otherwise); `mutation_classes.exploration` ∈ complete | bound | truncated;
   curated `class_nicknames`; ingest-time aggregates + provenance in
-  `rank_stats` (+ per-shard counts); `downloads` logs exports.
-- **Sharding** (`data/shards.json`, `src/db/shard.ts`): one main database +
-  per-rank split databases (rank 6: `qmd-n6-0/1/2/3` by id-hash bucket). Lists
-  query every shard of the rank and merge (`src/api/merge.ts`); a class and
-  its labelings live in the class id's shard; `scripts/migrate-all.sh`
-  migrates every shard; `scripts/import-d1.sh` routes parts by manifest.
+  `rank_stats`; `downloads` logs exports.
+- **Two schema files, and the serving one is `src/db/schema.ts`** (Postgres;
+  DDL is hand-written in `drizzle-pg/*.sql`, which is authoritative and
+  deliberately withholds primary keys so the bulk load hits a bare heap).
+  `src/db/schema.sqlite.ts` + `drizzle/` describe the offline pipeline's
+  *intermediate* SQLite only. Shared domain types live in `src/db/types.ts` so
+  neither depends on the other. Never point `drizzle.config.ts` at the
+  Postgres schema.
+- **`data/shards.json` is pipeline-only.** It still names the D1-format parts
+  the exporter writes (`qmd/d1_export.py`, `qmd/bigcell.py`); the Worker does
+  not read it. Deleting it breaks generation.
 - **A rank's quiver rows are the cell plus the mutation-finite classes.**
   Exploration always runs at `EXPLORE_BOUND = 2`, so a cell taken at a lower
   bound (ranks 7-8 use `|b_ij| <= 1`) reaches weight-2 quivers outside it;

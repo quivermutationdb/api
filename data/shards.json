@@ -1,0 +1,30 @@
+{
+  "$comment": "Which database holds which rank IN THE OFFLINE PIPELINE'S INTERMEDIATE FORMAT. Read by qmd/d1_export.py (file naming, shard_counts) and qmd/bigcell.py. NOT read by the Worker: the API has served one PlanetScale Postgres database since the 2026-09-09 cutover, and src/db/shard.ts no longer mirrors this file. It survives because the pipeline still emits D1 SQL as its intermediate (scripts/pg-load-local.sh and release-data.sh replay those parts into one SQLite, then render Postgres COPY text), and that format's part naming is defined here. Deleting it breaks generation with FileNotFoundError in _shards_config -- which is exactly what happened on 2026-09-09. Retire it only when the pipeline emits COPY text directly.",
+  "main": {
+    "binding": "DB",
+    "database": "qmd"
+  },
+  "split": {
+    "6": {
+      "buckets": 4,
+      "databases": [
+        {
+          "binding": "DB_N6_0",
+          "database": "qmd-n6-0"
+        },
+        {
+          "binding": "DB_N6_1",
+          "database": "qmd-n6-1"
+        },
+        {
+          "binding": "DB_N6_2",
+          "database": "qmd-n6-2"
+        },
+        {
+          "binding": "DB_N6_3",
+          "database": "qmd-n6-3"
+        }
+      ]
+    }
+  }
+}
