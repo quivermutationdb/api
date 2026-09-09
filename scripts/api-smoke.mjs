@@ -108,11 +108,31 @@ const st = await json("/stats");
   check("cursor walk covers rank 4 exactly, no dups", ids.length === 667 && new Set(ids).size === 667, String(ids.length));
   const me = await json("/quivers?rank=4&sort=max_edge&dir=desc&limit=100");
   check("sort max_edge desc monotone", monotone(me.items.map((i) => i.max_edge), (a, b) => b - a));
-  const dt = await walk("/quivers?rank=4&sort=dynkin_type&dir=desc&is_open=false", (i) => i.dynkin_type ?? "");
-  check("cursor walk under dynkin desc with NULLs covers all finite rank-4 quivers",
-    dt.length === (await json("/quivers?rank=4&is_open=false&limit=1&total=exact")).total && monotone(dt, (a, b) => a < b ? 1 : a > b ? -1 : 0));
+  // Postgres NULL placement: FIRST descending, LAST ascending (src/api/cursor.ts).
+  // The old assertion mapped null -> "" and demanded plain descending order,
+  // which silently encoded SQLite's opposite placement. What has to hold is
+  // that the walk covers every row exactly once and the non-null run is
+  // ordered -- placement is a separate, explicit check.
+  const dtRaw = await walk("/quivers?rank=4&sort=dynkin_type&dir=desc&is_open=false", (i) => i.dynkin_type);
+  const dtTotal = (await json("/quivers?rank=4&is_open=false&limit=1&total=exact")).total;
+  const dtNonNull = dtRaw.filter((v) => v !== null);
+  check("cursor walk under dynkin desc covers every finite rank-4 quiver exactly once",
+    dtRaw.length === dtTotal, `${dtRaw.length} vs ${dtTotal}`);
+  check("dynkin desc: NULLs first, non-null run descending",
+    dtRaw.slice(0, dtRaw.length - dtNonNull.length).every((v) => v === null)
+      && monotone(dtNonNull, (a, b) => a < b ? 1 : a > b ? -1 : 0));
+  const dtAsc = await walk("/quivers?rank=4&sort=dynkin_type&dir=asc&is_open=false", (i) => i.dynkin_type);
+  const ascNonNull = dtAsc.filter((v) => v !== null);
+  check("dynkin asc: NULLs last, non-null run ascending, same coverage",
+    dtAsc.length === dtTotal
+      && dtAsc.slice(ascNonNull.length).every((v) => v === null)
+      && monotone(ascNonNull, (a, b) => a < b ? -1 : a > b ? 1 : 0));
   const cs = await json("/quivers?rank=4&sort=class_size&dir=desc&is_open=false&limit=100");
-  check("sort class_size desc monotone (nulls last)", monotone(cs.items.map((i) => i.class_size), (a, b) => (b ?? -1) - (a ?? -1)));
+  const csv = cs.items.map((i) => i.class_size);
+  const csNonNull = csv.filter((v) => v !== null);
+  check("sort class_size desc: NULLs first, non-null run descending",
+    csv.slice(0, csv.length - csNonNull.length).every((v) => v === null)
+      && monotone(csNonNull, (a, b) => b - a));
   check("offset paging still works", (await json("/quivers?rank=4&offset=660&limit=100")).items.length === 7);
   check("labelings scope rejects custom sort", "detail" in await json("/quivers?scope=labelings&sort=max_edge", 400));
   const labs = await walk("/quivers?rank=3&scope=labelings", (i) => i.labeling_ord);
@@ -144,8 +164,12 @@ const st = await json("/stats");
   const finC = await json("/classes?is_mutation_finite=true&limit=1000");
   const infC = await json("/classes?is_mutation_finite=false&limit=1000");
   check("class finiteness filters partition", finC.total + infC.total === st.mutation_classes && finC.items.every((c) => c.is_finite_confirmed));
-  check("class sort dynkin desc + unknown sort 400", "detail" in await json("/classes?sort=bogus", 400)
-    && monotone((await json("/classes?rank=4&sort=dynkin_type&dir=desc&is_open=false&limit=100")).items.map((c) => c.dynkin_type ?? ""), (a, b) => a < b ? 1 : a > b ? -1 : 0));
+  const cdt = (await json("/classes?rank=4&sort=dynkin_type&dir=desc&is_open=false&limit=100")).items.map((c) => c.dynkin_type);
+  const cdtNonNull = cdt.filter((v) => v !== null);
+  check("class sort dynkin desc (NULLs first) + unknown sort 400",
+    "detail" in await json("/classes?sort=bogus", 400)
+      && cdt.slice(0, cdt.length - cdtNonNull.length).every((v) => v === null)
+      && monotone(cdtNonNull, (a, b) => a < b ? 1 : a > b ? -1 : 0));
   check("404 shapes", "detail" in await json("/quivers/Q.n3.0000000000000000", 404) && "detail" in await json("/classes/nope", 404));
 }
 

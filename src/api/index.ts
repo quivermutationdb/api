@@ -19,7 +19,7 @@ import { cors } from "hono/cors";
 import { rankStats } from "../db/schema";
 import { createPool, mainDb, withDb } from "../db/shard";
 import { classesRoutes } from "./classes";
-import { BadRequest, Unavailable } from "./errors";
+import { BadRequest, Unavailable, isStatementTimeout } from "./errors";
 import { exportRoutes } from "./export";
 import { lookupRoutes } from "./lookup";
 import { nicknamesRoutes } from "./nicknames";
@@ -95,6 +95,16 @@ api.onError((err, c) => {
     console.error(err);
     c.header("Retry-After", String(err.retryAfter));
     return c.json({ detail: err.message }, 503);
+  }
+  if (isStatementTimeout(err)) {
+    console.error("statement timeout", c.req.url);
+    return c.json({
+      detail: "This query is too expensive to serve at this scale and was "
+        + "cancelled. Sorting a large rank by a column with no matching index "
+        + "is the usual cause -- the default sort is indexed and fast. Narrow "
+        + "the cut with filters, or page with next_cursor under the default "
+        + "sort. Retrying this exact request will time out again.",
+    }, 400);
   }
   console.error(err);
   return c.json({ detail: "Internal server error" }, 500);

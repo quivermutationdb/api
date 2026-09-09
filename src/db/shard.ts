@@ -32,7 +32,17 @@ const MAX_CONNECTIONS_PER_REQUEST = 3;
 export function createPool(env: Env): Pool {
   const connectionString = env.HYPERDRIVE?.connectionString;
   if (!connectionString) throw new Error("HYPERDRIVE binding is not configured");
-  return new Pool({ connectionString, max: MAX_CONNECTIONS_PER_REQUEST });
+  const pool = new Pool({ connectionString, max: MAX_CONNECTIONS_PER_REQUEST });
+  // MANDATORY, not defensive. `pg.Pool` emits "error" when a pooled socket dies
+  // outside a query -- which is exactly what the server-side statement_timeout
+  // causes: it cancels the statement and the connection goes away underneath
+  // us. Node treats an unhandled "error" event as fatal, so without this a
+  // single slow query killed the whole isolate with "This socket has been ended
+  // by the other party", taking every concurrent request down with it. Observed,
+  // not theorised. The request's own error path reports the failure; this
+  // listener only has to keep the process alive.
+  pool.on("error", (e) => console.error("idle pool client error", e));
+  return pool;
 }
 
 /**

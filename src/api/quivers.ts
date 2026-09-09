@@ -89,7 +89,17 @@ export function filtersAsRecord(f: ListFilters): Record<string, unknown> {
 /** WHERE conditions (the legacy backend's _filtered_quivers, extended). */
 export function filterConditions(f: ListFilters): SQL[] {
   const conds: SQL[] = [];
-  if (f.rank !== undefined) conds.push(eq(q.n, f.rank));
+  if (f.rank !== undefined) {
+    conds.push(eq(q.n, f.rank));
+    // Redundant with n = rank, and deliberately so. Ids are `Q.n{k}.{16 hex}`
+    // (an enforced invariant -- see CLAUDE.md), so every rank-k row lies in the
+    // byte range ['Q.nk.', 'Q.nk/') under the C collation. Stating it gives the
+    // planner a range it can seek on quivers_pkey; without it, ORDER BY id with
+    // a rank filter scans the pkey from the start, past every lower-rank id,
+    // because ids sort by rank. Measured on rank 6, where that means walking
+    // 5.9 M rows first: **7,340 ms with the range removed, 1.6 ms with it.**
+    conds.push(sql`${q.id} >= ${`Q.n${f.rank}.`} and ${q.id} < ${`Q.n${f.rank}/`}`);
+  }
   if (f.maxEdge !== undefined) conds.push(eq(q.maxEdge, f.maxEdge));
   if (f.isAcyclic !== undefined) conds.push(eq(q.isAcyclic, f.isAcyclic));
   if (f.isConnected !== undefined) conds.push(eq(q.isConnected, f.isConnected));

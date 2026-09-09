@@ -17,6 +17,29 @@ export class Unavailable extends Error {
   }
 }
 
+/**
+ * Postgres SQLSTATE 57014, query_canceled -- here, always the server-side
+ * statement_timeout. It means the query as written cannot be served at this
+ * scale, so it is NOT a 503: retrying an identical request will time out
+ * identically, and telling an agent to retry would just burn its budget.
+ */
+export const QUERY_CANCELED = "57014";
+
+/**
+ * Walks the cause chain: Drizzle wraps driver errors in a DrizzleQueryError
+ * carrying the query text, so the pg error -- and its SQLSTATE -- is at
+ * `.cause`, not the top level. Checking only the top level silently misses
+ * every timeout and reports it as a 500.
+ */
+export function isStatementTimeout(e: unknown): boolean {
+  for (let cur: unknown = e, depth = 0; cur && depth < 5; depth++) {
+    if (typeof cur !== "object") break;
+    if ((cur as { code?: unknown }).code === QUERY_CANCELED) return true;
+    cur = (cur as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
 export function parseBool(name: string, v: string | undefined): boolean | undefined {
   if (v === undefined || v === "") return undefined;
   const s = v.toLowerCase();

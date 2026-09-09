@@ -107,7 +107,13 @@ export function classListParamsFrom(get: (k: string) => string | undefined): Cla
 
 export async function listClasses(env: Env, p: ClassListParams) {
   const conds: SQL[] = [];
-  if (p.rank !== undefined) conds.push(eq(mc.n, p.rank));
+  if (p.rank !== undefined) {
+    conds.push(eq(mc.n, p.rank));
+    // Same trick as filterConditions in quivers.ts: `MC.n{k}.{16 hex}` means a
+    // rank confines ids to a byte range, which the planner can seek on the
+    // primary key instead of scanning past every lower rank's ids.
+    conds.push(sql`${mc.id} >= ${`MC.n${p.rank}.`} and ${mc.id} < ${`MC.n${p.rank}/`}`);
+  }
   if (p.dynkinType) conds.push(eq(mc.dynkinType, p.dynkinType));
   if (p.isOpen !== undefined) conds.push(eq(mc.isOpen, p.isOpen));
   if (p.isMutationFinite !== undefined) {

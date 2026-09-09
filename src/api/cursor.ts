@@ -76,22 +76,34 @@ function nullSafeEq(col: KeyCol, v: string | number | null): SQL {
 }
 
 function strictlyAfter(col: KeyCol, dir: Dir, v: string | number | null): SQL {
-  if (dir === "asc") return v === null ? isNotNull(col) : sql`${col} > ${v}`;
-  return v === null ? sql`0` : or(sql`${col} < ${v}`, isNull(col))!;
+  // Postgres's native NULL placement: last ascending, first descending.
+  if (dir === "asc") {
+    return v === null ? sql`false` : or(sql`${col} > ${v}`, isNull(col))!;
+  }
+  return v === null ? isNotNull(col) : sql`${col} < ${v}`;
 }
 
 /**
- * NULL placement is stated explicitly and must stay that way. Postgres's own
- * default is the opposite of what `afterKey` encodes -- NULLs last ascending,
- * first descending -- so dropping these clauses would silently reorder every
- * page over a nullable column (class_size, dynkin_type, mutation_finite) out of
- * agreement with the keyset predicate, which is how a paged walk starts
- * skipping rows. The chosen placement is SQLite's, kept deliberately so the
- * published page order did not change at the D1 -> Postgres cutover.
+ * ORDER BY in Postgres's NATIVE null placement -- NULLs last ascending, first
+ * descending -- which `afterKey` above encodes to match.
+ *
+ * This deliberately does NOT pin `nulls first`/`nulls last`, and that is a
+ * performance decision, not a stylistic one. A default btree index is built
+ * ASC NULLS LAST, so an explicit `asc nulls first` cannot be satisfied by the
+ * index: Postgres abandons the index scan, and for a rank-6 browse page that
+ * means seq-scanning 42.5 M rows, hash-joining all of them, and top-N sorting.
+ * Measured on the live database, that single clause cost **60,209 ms against
+ * 21 ms** for the identical query without it.
+ *
+ * The earlier version pinned SQLite's placement (NULLs first ascending) so the
+ * published page order would not change at the D1 -> Postgres cutover. The
+ * order does now change for the nullable sort columns (class_size,
+ * dynkin_type, class_type) -- worth a changelog line -- but pagination stays
+ * correct, because correctness depends on ORDER BY and the keyset predicate
+ * AGREEING, not on which placement they agree upon. They agree here.
  */
 export function orderBy(columns: KeyCol[], dirs: Dir[]): SQL[] {
-  return columns.map((c, i) =>
-    (dirs[i] === "desc" ? sql`${c} desc nulls last` : sql`${c} asc nulls first`));
+  return columns.map((c, i) => (dirs[i] === "desc" ? sql`${c} desc` : sql`${c} asc`));
 }
 
 /**
