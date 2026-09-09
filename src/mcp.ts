@@ -66,12 +66,16 @@ export function createQmdServer(env: Env) {
 
   server.registerTool("search_quivers", {
     description: "Filter, sort and page quivers. Returns items with exchange_matrix and class summary plus next_cursor. "
-      + "scope=labelings returns one row per labeled exchange matrix (default sort only).",
+      + "scope=labelings returns one row per labeled exchange matrix (default sort only). "
+      + "Counting a filtered cut of a 42.5M-row rank is a full scan, so by default the count stops "
+      + "at 10,000 and the response sets total_is_lower_bound: true; pass total='exact' only when you "
+      + "need the true figure. Page with next_cursor rather than inferring page count from total.",
     inputSchema: {
       ...FILTERS, ...PAGING,
       scope: z.enum(["distinct", "labelings"]).optional(),
       sort: z.enum(["qmd_id", "num_vertices", "class_size", "max_edge", "dynkin_type", "class_type"]).optional(),
       dir: z.enum(["asc", "desc"]).optional(),
+      total: z.enum(["capped", "exact"]).optional(),
     },
   }, async (args) => {
     try {

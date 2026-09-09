@@ -32,6 +32,11 @@ Maintainer: Blake Jackson <jackson@icarm.io>
 - `GET /api/quivers?rank=4&is_acyclic=true&limit=100` — filter/sort/page.
   Every list returns `next_cursor`; pass it back as `?cursor=` (opaque).
   `scope=labelings` gives one row per labeled exchange matrix.
+  Page with `next_cursor`, not by computing pages from `total`: counting a
+  filtered cut of a 42.5 M-row rank is a full table scan, so the count stops
+  at 10,000 and the response sets `total_is_lower_bound: true`. Add
+  `?total=exact` when you genuinely need the true figure — it is slow by
+  design. A rank-only cut is answered from stored aggregates and is exact.
 - `GET /api/quivers/{id}` · `GET /api/quivers/{id}/labelings`
 - `GET /api/classes` · `GET /api/classes/{id}` — invariants + provenance +
   first page of members; `GET /api/classes/{id}/quivers` (distinct members,

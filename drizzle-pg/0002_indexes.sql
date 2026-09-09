@@ -40,9 +40,49 @@ CREATE INDEX CONCURRENTLY idx_q_representation_type   ON quivers (representation
 CREATE INDEX CONCURRENTLY idx_q_mc_labcount           ON quivers (mutation_class_id, labeling_count);
 CREATE INDEX CONCURRENTLY idx_q_n_seq                 ON quivers (n, seq);
 
+-- Partial indexes for the filterable quiver columns that have no (n, col)
+-- index of their own: is_acyclic, is_connected and explored (mutation_class_id
+-- IS NOT NULL). Each covers only the RARE side of a lopsided boolean; the
+-- common side needs no index, because the API's capped count (TOTAL_CAP in
+-- src/api/quivers.ts) stops as soon as it has seen enough rows. The two
+-- together remove the last query shape that scanned the 9 GB heap.
+--
+-- Measured on the Phase 0 load, single-threaded, cap 10k (docs/PLANETSCALE.md):
+--   n=6 AND NOT is_connected     5956 ms -> 0.045 ms   (index is 8 kB: no such row)
+--   n=6 AND is_acyclic (exact)   6002 ms -> 413 ms
+--   n=6 AND explored (exact)        --   -> 198 ms
+-- Total cost of all three: 69 MB, against 5.07 GB of existing index.
+CREATE INDEX CONCURRENTLY idx_q_n_acyclic   ON quivers (n) WHERE is_acyclic;
+CREATE INDEX CONCURRENTLY idx_q_n_disconn   ON quivers (n) WHERE NOT is_connected;
+CREATE INDEX CONCURRENTLY idx_q_n_explored  ON quivers (n) WHERE mutation_class_id IS NOT NULL;
+
 CREATE INDEX CONCURRENTLY idx_lab_qmd_ord             ON labelings (qmd_id, ord);
 
 CREATE UNIQUE INDEX CONCURRENTLY idx_nick_slug        ON class_nicknames (slug);
 
 CREATE INDEX CONCURRENTLY idx_dl_created_at           ON downloads (created_at);
 CREATE INDEX CONCURRENTLY idx_dl_email                ON downloads (email);
+
+
+-- ---------------------------------------------------------------------------
+-- Planner settings
+-- ---------------------------------------------------------------------------
+-- random_page_cost defaults to 4.0, a ratio calibrated for seek-bound spinning
+-- disks. On SSD the true ratio is near 1, and the stale default makes the
+-- planner reject perfectly good index scans in favour of scanning the whole
+-- 9 GB quivers heap. Measured, single-threaded: `n = 7 AND is_acyclic` went
+-- from a 5.5 s Seq Scan to a 0.65 s Index Scan on idx_q_n from this one
+-- setting -- 8.4x, no schema change. Rank 6 still (correctly) prefers a scan,
+-- being 84 % of the table.
+--
+-- Wrapped because a managed provider may not grant ALTER DATABASE; if it does
+-- not, set it in the PlanetScale console instead, or the Worker will silently
+-- run every filtered count against the spinning-disk cost model.
+DO $$
+BEGIN
+  EXECUTE format('ALTER DATABASE %I SET random_page_cost = 1.1', current_database());
+EXCEPTION WHEN insufficient_privilege THEN
+  RAISE NOTICE 'could not ALTER DATABASE: set random_page_cost = 1.1 in the PlanetScale console';
+END $$;
+
+ANALYZE;

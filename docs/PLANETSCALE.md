@@ -5,9 +5,9 @@ yet.** The two blockers are cleared — ranks 7 and 8 are generated and verified
 and the pre-flight code review is done and its safe-on-D1 fixes are landed. The
 live system is still one Worker over D1 exactly as CLAUDE.md describes.
 
-Remaining before the first dashboard click: **measure the real Postgres
-footprint locally** (§"Still open", item 1). Everything else is a decision or a
-click, both listed in §"Provisioning runbook".
+Phase 0 is complete: the footprint is measured, the query latency is measured,
+and the one regression that measurement exposed is fixed in code. Everything
+remaining is a decision or a click, both listed in §"Provisioning runbook".
 
 Decided 2026-09-01 by Blake. This file is authoritative; the original spec
 artifact <https://claude.ai/code/artifact/8b57ac3a-faf8-4a56-9d48-4831e4e19055>
@@ -184,6 +184,59 @@ costing roughly half a text-id one, which is the measured version of the plan's
   pressure on the filtered paths, not disk — which makes the `totalsFor`
   regression the thing to watch, exactly as the pre-flight predicted.
 
+## Measured query latency  (2026-09-09, Phase 0b) — and the fix
+
+Footprint is not latency, so the filtered paths were then timed directly, with
+`max_parallel_workers_per_gather = 0` as the honest stand-in for half a vCPU.
+On an M-series Mac with fast NVMe, so these are a **floor**, not a prediction:
+
+| `totalsFor` fallback | plan | before |
+| --- | --- | ---: |
+| rank 6 + `mutation_finite` | Index Scan | 32 ms |
+| rank 7 + `is_acyclic` | Seq Scan | 5.5 s |
+| rank 6 + `is_acyclic` | Seq Scan | 6.0 s |
+| rank 6 + `max_edge = 2` | Seq Scan | 8.1 s |
+| rank 6 + `is_connected = false` | Seq Scan | 6.0 s |
+
+Every bad row is the same thing: a full scan of the 9 GB `quivers` heap to
+produce one number. Warm and cold were identical (6.03 s vs 6.00 s) — at 9 GB
+there is no warm. PS-40 makes it worse in both directions at once, since the
+heap cannot fit in 4 GB and the filter runs on half a vCPU: **tens of seconds,
+a browse page that never paints.**
+
+**A bigger tier does not fix this.** PS-160 buys 4x the CPU for ~4x the price
+and turns 40 s into perhaps 12 s — still broken, now expensively. The scan is
+9 GB whatever you rent. Three cheap changes fix it instead:
+
+1. **`random_page_cost = 1.1`** (`drizzle-pg/0002_indexes.sql`). The 4.0
+   default is calibrated for seek-bound spinning disks and makes the planner
+   refuse good index scans. Rank 7 + `is_acyclic`: **5.5 s → 0.65 s**, 8.4x,
+   from one setting. Rank 6 still (correctly) prefers a scan, being 84 % of
+   the table.
+2. **Three partial indexes** on the filterable quiver columns that had no
+   `(n, col)` index — `is_acyclic`, `NOT is_connected`, and explored
+   (`mutation_class_id IS NOT NULL`). Each covers only the *rare* side of a
+   lopsided boolean; the capped count below covers the common side. Together
+   they cost **69 MB** against 5.07 GB of existing index.
+3. **A capped count** — `TOTAL_CAP = 10_000` in `src/api/quivers.ts`. Counting
+   happens inside a `LIMIT TOTAL_CAP + 1` subquery, so the engine stops once
+   the answer stops being interesting, and the response sets
+   `total_is_lower_bound: true`. `?total=exact` still buys the real figure.
+
+Re-measured on the same data, running the exact SQL Drizzle now emits:
+
+| cut | after | speedup |
+| --- | ---: | ---: |
+| rank 6 + `is_acyclic`, capped | **11.8 ms** | 508x |
+| rank 6 + explored, capped | **65.7 ms** | — |
+| rank 6 + `is_connected = false`, capped | **0.017 ms** | 350,000x |
+| rank 6 + `is_acyclic`, `total=exact` | **413 ms** | 14.5x |
+| rank 6 + explored, `total=exact` | **198 ms** | — |
+
+Note the last two: with the partial indexes the *exact* count is also viable
+again, so the cap is a safety net rather than the only thing standing between
+the browse page and a timeout. **PS-40 is the steady tier.**
+
 ## Load-path defects found by doing it  (all fixed)
 
 Five, none of which are visible on paper. Two would have produced a database
@@ -257,10 +310,13 @@ ship.
 * **`totalsFor` ran BEFORE the page query**, putting a `count(*)` over two left
   joins on the critical path of every list response. Now started alongside the
   page read, with sort validation hoisted above both so no promise dangles on
-  throw. Still the **highest-risk regression** on one PS-40: parallel fan-out
-  across four shards becomes serial on half a vCPU over 42 M rows. If it bites,
-  escalate: make the exact count opt-out, or cap it with a `LIMIT` subquery
-  ("1000+").
+  throw. It was flagged here as the highest-risk regression, with "cap it with
+  a `LIMIT` subquery" as the escalation. Measurement (§"Measured query
+  latency") confirmed the risk was real — 6 s single-threaded on a machine far
+  faster than a PS-40 — so **the escalation was taken up front rather than held
+  in reserve**: capped by default at `TOTAL_CAP = 10_000`, `?total=exact` to
+  opt out, plus three partial indexes and `random_page_cost = 1.1`. Worst
+  measured browse cut is now 66 ms. **Closed.**
 * **Typed `Unavailable` → 503 with `Retry-After`** added to `errors.ts` and
   wired into `onError`. Nothing raises it on D1, which has no pool; it exists
   so pooled-Postgres exhaustion does not reach clients (or an agent following
@@ -328,7 +384,8 @@ which cannot be tested until a pool exists — check it during the port.
 * `totalsFor` in `quivers.ts` only takes the `rank_stats` fast path when the
   filter is rank-only; any other filter runs a real `count(*)` over the whole
   table. Today that fans out across four shards in parallel — on one PS-40 it
-  is serial on half a vCPU across 42 M rows. **Highest-risk regression.**
+  is serial on half a vCPU across 42 M rows. ~~**Highest-risk regression.**~~
+  Measured and fixed, 2026-09-09; see §"Measured query latency".
 * No other SQLite-isms exist: no `json_extract`, `GLOB`, `strftime`,
   `INSERT OR`, and `random.ts` already avoids `ORDER BY RANDOM()`. Only
   `CURRENT_TIMESTAMP` in the schema.
@@ -368,6 +425,15 @@ psql -d qmd -c ANALYZE
    match `drizzle-pg/0001_init.sql`. The raw DDL exists; the Drizzle
    declaration does not, and it is what the query builder needs.
 3. **Regenerate `dist/nicknames.sql`** — the copy on disk is stale (see above).
+   *(Done 2026-09-09: 1 entry → 21.)*
+4. **Landed 2026-09-09, from the latency measurement:** `random_page_cost` and
+   the three partial indexes in `drizzle-pg/0002_indexes.sql`; the capped count
+   (`TOTAL_CAP`, `?total=exact`, `total_is_lower_bound`) across
+   `src/api/quivers.ts`, `errors.ts`, `openapi.ts`, `mcp.ts`, `browse.html`,
+   `search.html`, `download.js`; smoke coverage in `scripts/api-smoke.mjs`.
+   The suite passes with `TOTAL_CAP` forced to 3, which is how the lower-bound
+   branch is exercised on a 692-row dev dataset — do that again after touching
+   `totalsFor`.
 
 ### Phase 1 — create the database THROUGH Cloudflare  (billing: get this right first)
 
@@ -442,12 +508,24 @@ psql -d qmd -c ANALYZE
 
 ## Sticking points
 
-* **Load on a small instance.** `COPY` of ~50 M rows plus ~15 index builds on
+* **Load on a small instance.** `COPY` of ~50 M rows plus ~18 index builds on
   0.5 vCPU is painful. Provision **PS-160** for the load, resize down to PS-40
-  after. Confirm PlanetScale's resize downtime characteristics first.
+  after — the steady tier is confirmed by §"Measured query latency", not just
+  by the footprint. Blake confirmed 2026-09-09 that PlanetScale allows a
+  downgrade at any time, so this is reversible in a click if a filtered path
+  misbehaves under real traffic.
 * **Cursor format change.** The composite cursor is `{shardKey: key}` JSON in
   an opaque wrapper; one shard changes the encoded value. Emit the new format
   and reject old cursors with a `400` naming the change.
+* **Filtered list totals become lower bounds.** `total`, `distinct_total` and
+  `labeled_total` stop being exact whenever the filter is not rank-only and the
+  cut exceeds `TOTAL_CAP`; the new `total_is_lower_bound: true` says so, and
+  `?total=exact` restores the old behaviour at the old cost. Additive field, so
+  nothing breaks that ignores it — but a client computing a page count from
+  `total` will under-count, which is why `browse.html` switches to a prev/next
+  pager (driven by whether the last page came back full) when the flag is set.
+  Agents are told to page with `next_cursor` in the MCP tool description and
+  the OpenAPI note. Worth a changelog line.
 * **Rank-6 responses change shape** — `dynkin_type`, `class_size`,
   `exploration`, `nickname` start returning values where 67 % were NULL. That
   is the bug fix, but it is a visible behaviour change worth a changelog note.

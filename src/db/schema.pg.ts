@@ -148,6 +148,13 @@ export const quivers = pgTable(
     index("idx_q_representation_type").on(t.representationType),
     index("idx_q_mc_labcount").on(t.mutationClassId, t.labelingCount),
     index("idx_q_n_seq").on(t.n, t.seq),
+    // Three partial indexes also exist on this table -- idx_q_n_acyclic,
+    // idx_q_n_disconn, idx_q_n_explored -- declared only in
+    // drizzle-pg/0002_indexes.sql. They are planner-only (they cover the rare
+    // side of a lopsided boolean filter; the capped count covers the common
+    // side), the query builder never names them, and Drizzle has no partial
+    // index builder, so declaring them here would just make drizzle-kit want
+    // to drop them. Delete them there, not here.
   ],
 );
 

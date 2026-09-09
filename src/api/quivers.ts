@@ -22,7 +22,8 @@ import {
 } from "../db/schema";
 import { dbForId, dbOf, mainDb, shardsForRank, type Database, type Shard } from "../db/shard";
 import { afterKey, decodeCursor, encodeCursor, orderBy, type Dir, type Key, type KeyCol } from "./cursor";
-import { BadRequest, parseBool, parseDir, parseInteger, parsePaging } from "./errors";
+import { BadRequest, parseBool, parseDir, parseInteger, parsePaging, parseTotalMode,
+         type TotalMode } from "./errors";
 import { mergeShards } from "./merge";
 
 export { BadRequest } from "./errors";
@@ -234,9 +235,36 @@ export interface ListParams {
   offset: number;
   limit: number;
   cursor?: string;
+  total: TotalMode;
 }
 
-async function totalsFor(env: Env, f: ListFilters, where: SQL | undefined) {
+/**
+ * Result counts for a list response. Three paths, cheapest first:
+ *
+ *   - rank-only filter -> the ingest-time aggregates in `rank_stats`, no scan;
+ *   - `?total=capped` (the default) -> count inside a `LIMIT TOTAL_CAP + 1`
+ *     subquery, so the engine stops once the answer stops being interesting;
+ *   - `?total=exact` -> a real count(*) over the filter.
+ *
+ * The cap exists because the exact count is a full scan of the quivers heap
+ * whenever the filter is neither rank-only nor index-backed, and at rank 6
+ * that heap is 9 GB. Measured single-threaded on the Phase 0 Postgres load,
+ * `n = 6 AND is_acyclic` took 6.0 s exact against 12 ms capped at 10k. On a
+ * PS-40 (0.5 vCPU, and 4 GB of RAM the heap does not fit in) the exact form is
+ * tens of seconds: a browse page that never paints. docs/PLANETSCALE.md has
+ * the measurements and the partial indexes that cover the other direction.
+ *
+ * `capped: true` means every number here is a LOWER BOUND, surfaced to clients
+ * as `total_is_lower_bound`. They stay real counts of rows actually visited
+ * rather than the cap itself, which is what keeps them meaningful under
+ * sharding, where each shard is capped independently and the bounds add.
+ */
+export const TOTAL_CAP = 10_000;
+
+interface Totals { distinct: number; labeled: number; capped: boolean }
+
+async function totalsFor(env: Env, f: ListFilters, where: SQL | undefined,
+                         mode: TotalMode): Promise<Totals> {
   if (onlyRankFilter(f)) {
     const rows = await mainDb(env).select().from(rankStats)
       .where(f.rank !== undefined ? eq(rankStats.n, f.rank) : undefined);
@@ -247,16 +275,40 @@ async function totalsFor(env: Env, f: ListFilters, where: SQL | undefined) {
     return {
       distinct: rows.reduce((a, r) => a + Number(r.quiverCount), 0),
       labeled: rows.reduce((a, r) => a + Number(r.labeledQuiverCount), 0),
+      capped: false,
     };
   }
-  const per = await Promise.all(shardsForRank(f.rank).map((s) => dbOf(env, s)
-    .select({ distinct: sql<number>`count(*)`, labeled: sql<number>`coalesce(sum(${q.labelingCount}), 0)` })
-    .from(q).leftJoin(mc, eq(q.mutationClassId, mc.id)).leftJoin(nick, eq(nick.mcId, mc.id))
-    .where(where)));
+  const per = await Promise.all(shardsForRank(f.rank)
+    .map((s) => countIn(dbOf(env, s), where, mode)));
   return {
-    distinct: per.reduce((a, r) => a + Number(r[0]?.distinct ?? 0), 0),
-    labeled: per.reduce((a, r) => a + Number(r[0]?.labeled ?? 0), 0),
+    distinct: per.reduce((a, r) => a + r.distinct, 0),
+    labeled: per.reduce((a, r) => a + r.labeled, 0),
+    capped: per.some((r) => r.capped),
   };
+}
+
+/** One shard's contribution to `totalsFor`. */
+async function countIn(db: Database, where: SQL | undefined, mode: TotalMode): Promise<Totals> {
+  if (mode === "exact") {
+    const r = (await db
+      .select({ distinct: sql<number>`count(*)`,
+                labeled: sql<number>`coalesce(sum(${q.labelingCount}), 0)` })
+      .from(q).leftJoin(mc, eq(q.mutationClassId, mc.id)).leftJoin(nick, eq(nick.mcId, mc.id))
+      .where(where))[0];
+    return { distinct: Number(r?.distinct ?? 0), labeled: Number(r?.labeled ?? 0), capped: false };
+  }
+  // The one row past the cap is what distinguishes "exactly TOTAL_CAP" from
+  // "at least TOTAL_CAP"; it is dropped from the reported figure below.
+  const sub = db.select({ lc: q.labelingCount }).from(q)
+    .leftJoin(mc, eq(q.mutationClassId, mc.id)).leftJoin(nick, eq(nick.mcId, mc.id))
+    .where(where).limit(TOTAL_CAP + 1).as("capped_rows");
+  const r = (await db.select({
+    distinct: sql<number>`count(*)`,
+    labeled: sql<number>`coalesce(sum(${sub.lc}), 0)`,
+  }).from(sub))[0];
+  const seen = Number(r?.distinct ?? 0);
+  const capped = seen > TOTAL_CAP;
+  return { distinct: capped ? TOTAL_CAP : seen, labeled: Number(r?.labeled ?? 0), capped };
 }
 
 export async function listQuivers(env: Env, p: ListParams) {
@@ -275,12 +327,13 @@ export async function listQuivers(env: Env, p: ListParams) {
   // rank-only, totalsFor falls back to a real count(*) over two left joins;
   // awaiting it up front put that scan on the critical path of every list
   // response instead of running it alongside the page.
-  const totalsP = totalsFor(env, p.filters, where);
+  const totalsP = totalsFor(env, p.filters, where, p.total);
 
   if (p.scope === "labelings") {
     const [totals, r] = await Promise.all([totalsP, listLabelings(env, shards, conds, p)]);
     return { items: r.items, total: totals.labeled, distinct_total: totals.distinct,
-             labeled_total: totals.labeled, next_cursor: r.next_cursor };
+             labeled_total: totals.labeled, total_is_lower_bound: totals.capped,
+             next_cursor: r.next_cursor };
   }
 
   const { cols, dirs } = sortColumns(sortKey, dir);
@@ -298,6 +351,7 @@ export async function listQuivers(env: Env, p: ListParams) {
     total: totals.distinct,
     distinct_total: totals.distinct,
     labeled_total: totals.labeled,
+    total_is_lower_bound: totals.capped,
     next_cursor: r.next_cursor,
   };
 }
@@ -363,6 +417,7 @@ export function listParamsFrom(get: (k: string) => string | undefined, defaultLi
   }
   return {
     filters: parseFilters(get), scope, sort: get("sort"), dir: get("dir"), cursor: get("cursor"),
+    total: parseTotalMode(get("total")),
     ...parsePaging(get, defaultLimit),
   };
 }

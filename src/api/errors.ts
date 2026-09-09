@@ -40,6 +40,19 @@ export function parsePaging(get: (k: string) => string | undefined,
   };
 }
 
+export type TotalMode = "capped" | "exact";
+
+/**
+ * ?total= -- how hard the server should work for the result count.
+ * "capped" (default) stops counting past TOTAL_CAP and marks the answer a
+ * lower bound; "exact" pays for a full count. See totalsFor in quivers.ts.
+ */
+export function parseTotalMode(v: string | undefined): TotalMode {
+  if (v === undefined || v === "capped") return "capped";
+  if (v === "exact") return "exact";
+  throw new BadRequest("total must be 'capped' or 'exact'");
+}
+
 export function parseDir(v: string | undefined): "asc" | "desc" {
   if (v === undefined || v === "asc") return "asc";
   if (v === "desc") return "desc";

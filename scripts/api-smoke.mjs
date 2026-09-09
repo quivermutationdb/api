@@ -62,15 +62,38 @@ const st = await json("/stats");
   check("all quivers connected", (await json("/quivers?is_connected=false&limit=1")).total === 0);
   const r4 = await json("/quivers?rank=4&limit=1");
   check("/quivers rank filter", r4.total === 667 && r4.items[0].num_vertices === 4);
-  const open = await json("/quivers?rank=3&is_open=true&limit=100");
-  const closed = await json("/quivers?rank=3&is_open=false&limit=100");
+  // total=exact below wherever the assertion is about an exact partition or an
+  // exact coverage count: those must not silently become lower bounds if
+  // TOTAL_CAP is ever tuned, or the suite would pass by not counting.
+  const open = await json("/quivers?rank=3&is_open=true&limit=100&total=exact");
+  const closed = await json("/quivers?rank=3&is_open=false&limit=100&total=exact");
   check("rank-3 open/closed partition", open.total + closed.total === 22 && open.items.every((i) => i.is_open) && closed.items.every((i) => !i.is_open));
-  const fin = await json("/quivers?is_mutation_finite=true&limit=1000");
-  const inf = await json("/quivers?is_mutation_finite=false&limit=1000");
+  const fin = await json("/quivers?is_mutation_finite=true&limit=1000&total=exact");
+  const inf = await json("/quivers?is_mutation_finite=false&limit=1000&total=exact");
   check("mutation_finite filter uses the per-quiver label", fin.items.every((i) => i.mutation_finite === true) && inf.items.every((i) => i.mutation_finite === false));
   check("every rank-3/4 quiver has a finiteness label (bound 2 explores to the wall)", fin.total + inf.total === st.distinct_quivers, `${fin.total}+${inf.total}`);
   check("simply-laced filter", (await json("/quivers?is_simply_laced=true&limit=1000")).items.every((i) => i.max_edge <= 1));
-  check("explored filter", (await json("/quivers?explored=true&limit=1")).total === st.distinct_quivers && (await json("/quivers?explored=false&limit=1")).total === 0);
+  check("explored filter", (await json("/quivers?explored=true&limit=1&total=exact")).total === st.distinct_quivers && (await json("/quivers?explored=false&limit=1")).total === 0);
+  // ?total= -- the capped count. Written cap-agnostically so it holds whether
+  // or not this dataset is big enough to trip TOTAL_CAP: run the suite with a
+  // deliberately tiny cap to exercise the lower-bound branch.
+  {
+    const cut = "/quivers?rank=4&is_acyclic=true&limit=1";
+    const cap = await json(cut);
+    const exa = await json(`${cut}&total=exact`);
+    check("?total=exact is never a lower bound", exa.total_is_lower_bound === false);
+    check("capped total is exact when under the cap, a lower bound otherwise",
+      cap.total_is_lower_bound ? (cap.total < exa.total) : (cap.total === exa.total),
+      `capped=${cap.total} lower_bound=${cap.total_is_lower_bound} exact=${exa.total}`);
+    check("labeled_total is bounded the same way as total",
+      cap.labeled_total <= exa.labeled_total && (cap.total_is_lower_bound || cap.labeled_total === exa.labeled_total));
+    // A rank-only cut is answered from rank_stats, so it is exact at any cap.
+    const ro = await json("/quivers?rank=4&limit=1");
+    check("rank-only total comes from rank_stats, never capped",
+      ro.total_is_lower_bound === false && ro.total === 667, `${ro.total}`);
+    check("bad total mode rejected", "detail" in await (await get("/quivers?total=roughly", 400)).json());
+  }
+
   const a3 = await json("/search?dynkin_type=A3&limit=5");
   check("A3 class size 14, D4 50", a3.items[0].class_size === 14 && (await json("/search?dynkin_type=D4&limit=1")).items[0].class_size === 50);
   check("bad int -> 400", "detail" in await json("/quivers?rank=abc", 400));
@@ -87,7 +110,7 @@ const st = await json("/stats");
   check("sort max_edge desc monotone", monotone(me.items.map((i) => i.max_edge), (a, b) => b - a));
   const dt = await walk("/quivers?rank=4&sort=dynkin_type&dir=desc&is_open=false", (i) => i.dynkin_type ?? "");
   check("cursor walk under dynkin desc with NULLs covers all finite rank-4 quivers",
-    dt.length === (await json("/quivers?rank=4&is_open=false&limit=1")).total && monotone(dt, (a, b) => a < b ? 1 : a > b ? -1 : 0));
+    dt.length === (await json("/quivers?rank=4&is_open=false&limit=1&total=exact")).total && monotone(dt, (a, b) => a < b ? 1 : a > b ? -1 : 0));
   const cs = await json("/quivers?rank=4&sort=class_size&dir=desc&is_open=false&limit=100");
   check("sort class_size desc monotone (nulls last)", monotone(cs.items.map((i) => i.class_size), (a, b) => (b ?? -1) - (a ?? -1)));
   check("offset paging still works", (await json("/quivers?rank=4&offset=660&limit=100")).items.length === 7);

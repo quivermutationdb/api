@@ -31,6 +31,12 @@ const SORT_PARAMS = [
   p("dir", "string", "asc | desc"),
 ];
 
+const TOTAL_PARAM = p("total", "string",
+  "capped (default) | exact. Counting a filtered cut of a 42.5M-row rank is a "
+  + "full scan, so by default the count stops at 10,000 and the response sets "
+  + "total_is_lower_bound: true. Pass exact only when you need the true figure "
+  + "and can wait for it.");
+
 function p(name: string, type: string, description: string) {
   return { name, in: "query", required: false, schema: { type }, description };
 }
@@ -63,10 +69,10 @@ export const OPENAPI = {
   paths: {
     "/stats": { get: { summary: "Dataset totals and per-rank generation provenance", operationId: "getStats", responses: ok("Totals", "Stats") } },
     "/quivers": { get: { summary: "List quivers (browse)", operationId: "listQuivers",
-      parameters: [...FILTER_PARAMS, p("scope", "string", "distinct (default) | labelings — one row per labeled matrix; labelings scope supports only the default sort."), ...SORT_PARAMS, ...PAGE_PARAMS],
+      parameters: [...FILTER_PARAMS, p("scope", "string", "distinct (default) | labelings — one row per labeled matrix; labelings scope supports only the default sort."), ...SORT_PARAMS, ...PAGE_PARAMS, TOTAL_PARAM],
       responses: { ...ok("Page of quivers", "QuiverList"), ...badRequest } } },
     "/search": { get: { summary: "Same as /quivers with a larger default page (100)", operationId: "searchQuivers",
-      parameters: [...FILTER_PARAMS, ...SORT_PARAMS, ...PAGE_PARAMS], responses: { ...ok("Page of quivers", "QuiverList"), ...badRequest } } },
+      parameters: [...FILTER_PARAMS, ...SORT_PARAMS, ...PAGE_PARAMS, TOTAL_PARAM], responses: { ...ok("Page of quivers", "QuiverList"), ...badRequest } } },
     "/quivers/{id}": { get: { summary: "One quiver with its invariants", operationId: "getQuiver",
       parameters: [pathParam("id", "Q.n{rank}.{hash}")], responses: { ...ok("Quiver", "QuiverDetail"), ...notFound } } },
     "/quivers/{id}/labelings": { get: { summary: "Every labeled exchange matrix of this quiver in its class (paged)", operationId: "getQuiverLabelings",
@@ -121,7 +127,9 @@ export const OPENAPI = {
       QuiverDetail: { allOf: [{ $ref: "#/components/schemas/Quiver" }, { type: "object", properties: {
         label: { type: ["string", "null"] }, is_abundant: { $ref: "#/components/schemas/TriState" }, is_planar: { $ref: "#/components/schemas/TriState" },
         symmetry_group: { type: ["object", "null"] }, labeling_count: { type: ["integer", "null"] } } }] },
-      QuiverList: { type: "object", properties: { items: { type: "array", items: { $ref: "#/components/schemas/Quiver" } }, total: { type: "integer" }, distinct_total: { type: "integer" }, labeled_total: { type: "integer" }, next_cursor: { type: ["string", "null"] } } },
+      QuiverList: { type: "object", properties: { items: { type: "array", items: { $ref: "#/components/schemas/Quiver" } }, total: { type: "integer" }, distinct_total: { type: "integer" }, labeled_total: { type: "integer" },
+        total_is_lower_bound: { type: "boolean", description: "true when counting stopped at the cap: total, distinct_total and labeled_total are then lower bounds, not exact. Re-request with ?total=exact for the true figures. Always false for an unfiltered or rank-only cut, which is answered from ingest-time aggregates." },
+        next_cursor: { type: ["string", "null"] } } },
       Class: { type: "object", properties: {
         mc_id: { type: "string" }, label: { type: ["string", "null"] }, nickname: { type: ["string", "null"] }, nickname_slug: { type: ["string", "null"] },
         num_vertices: { type: "integer" }, dynkin_type: { type: ["string", "null"] }, is_open: { type: "boolean" }, exploration: { $ref: "#/components/schemas/Exploration" },

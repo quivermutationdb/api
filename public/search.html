@@ -222,13 +222,18 @@ let _lastFilters = {};
 let searchSeq = 0;      // monotone request counter; stale responses are dropped
 let _lastTotal = null;
 let _lastLabeledTotal = null;
+// See browse.html: the API caps counting a filtered cut and marks the answer a
+// lower bound. Search shows only the first 100 rows, so the flag only changes
+// how the count reads -- "10,000+" rather than a figure it cannot stand behind.
+let _lastTotalIsLowerBound = false;
 
 // Download the current form's cut. Only attach counts when the form still
 // matches the last search that was actually run (otherwise they could mislead).
 function openDownload() {
   const f = getFilters();
   const same = JSON.stringify(f) === JSON.stringify(_lastFilters);
-  const counts = same ? { distinct: _lastTotal, labelings: _lastLabeledTotal } : null;
+  const counts = same ? { distinct: _lastTotal, labelings: _lastLabeledTotal,
+                          lowerBound: _lastTotalIsLowerBound } : null;
   QMDDownload.open(f, counts, 'distinct');
 }
 
@@ -290,6 +295,7 @@ async function runSearch() {
 function renderResults(data, filters) {
   _lastTotal = data.total;
   _lastLabeledTotal = data.labeled_total ?? null;
+  _lastTotalIsLowerBound = !!data.total_is_lower_bound;
   const area = document.getElementById('results-area');
   const pills = renderActivePills(filters);
 
@@ -321,7 +327,7 @@ function renderResults(data, filters) {
   area.innerHTML = `
     ${pills ? `<div class="active-filters">${pills}</div>` : ''}
     <div class="results-header">
-      <span class="results-count">Found <b>${data.total.toLocaleString()}</b> quiver${data.total !== 1 ? 's' : ''}${data.total > 100 ? ' (showing first 100)' : ''}</span>
+      <span class="results-count">Found <b>${data.total.toLocaleString()}${_lastTotalIsLowerBound ? '+' : ''}</b> quiver${(data.total !== 1 || _lastTotalIsLowerBound) ? 's' : ''}${data.total > 100 ? ' (showing first 100)' : ''}</span>
       <a href="/browse.html" style="font-family:var(--mono);font-size:0.72rem;color:var(--accent);text-decoration:none">Browse all →</a>
     </div>
     <div class="table-wrap">

@@ -115,6 +115,13 @@ let currentPage = 1;
 let totalCount = 0;
 let distinctTotal = 0;
 let labeledTotal = 0;
+// The API caps counting a filtered cut at 10,000 rows and sets
+// total_is_lower_bound (see totalsFor in src/api/quivers.ts), because the exact
+// count of a filtered rank-6 cut is a full scan of a 9 GB table. When the total
+// is only a lower bound there is no known last page, so the numbered pager is
+// replaced by prev/next driven by whether the last page came back full.
+let totalIsLowerBound = false;
+let hasMore = false;
 let scope = 'distinct';            // 'distinct' | 'labelings'
 let sortCol = 'num_vertices';
 let sortDir = 'asc';
@@ -172,6 +179,8 @@ function renderError() {
 function renderTable(data) {
   const tbody = document.getElementById('table-body');
   totalCount = data.total;
+  totalIsLowerBound = !!data.total_is_lower_bound;
+  hasMore = !!(data.items && data.items.length === PAGE_SIZE);
   if (data.distinct_total != null) distinctTotal = data.distinct_total;
   if (data.labeled_total != null)  labeledTotal = data.labeled_total;
   document.getElementById('stat-noun').textContent =
@@ -205,17 +214,26 @@ function renderTable(data) {
     </tr>
   `).join('');
 
-  const totalPages = Math.ceil(totalCount / PAGE_SIZE);
+  const totalPages = totalIsLowerBound ? 0 : Math.ceil(totalCount / PAGE_SIZE);
   document.getElementById('stats-row').style.display = 'flex';
-  document.getElementById('stat-showing').textContent = totalCount.toLocaleString();
+  document.getElementById('stat-showing').textContent =
+    totalCount.toLocaleString() + (totalIsLowerBound ? '+' : '');
   document.getElementById('stat-page').textContent = currentPage;
-  document.getElementById('stat-pages').textContent = totalPages;
+  document.getElementById('stat-pages').textContent = totalIsLowerBound ? '?' : totalPages;
 
   renderPagination(totalPages);
 }
 
 function renderPagination(totalPages) {
   const el = document.getElementById('pagination');
+  if (totalIsLowerBound) {
+    // Page count unknown: offer only the two moves we can justify.
+    el.innerHTML =
+      `<button class="page-btn" onclick="goPage(${currentPage - 1})" ${currentPage === 1 ? 'disabled' : ''}>←</button>`
+      + `<span class="page-info">Page ${currentPage}</span>`
+      + `<button class="page-btn" onclick="goPage(${currentPage + 1})" ${hasMore ? '' : 'disabled'}>→</button>`;
+    return;
+  }
   if (totalPages <= 1) { el.innerHTML = ''; return; }
 
   const pages = [];
@@ -239,9 +257,10 @@ function renderPagination(totalPages) {
 let requestSeq = 0;
 
 async function goPage(p) {
-  const totalPages = Math.ceil(totalCount / PAGE_SIZE);
+  const totalPages = totalIsLowerBound ? 0 : Math.ceil(totalCount / PAGE_SIZE);
   // Only bound-check against a known page count; after an empty result
-  // (totalCount 0) page 1 must still be reachable so filters can be changed.
+  // (totalCount 0) page 1 must still be reachable so filters can be changed,
+  // and a lower-bound total (totalPages 0) must not cap paging at the cap.
   if (p < 1 || (totalPages > 0 && p > totalPages)) return;
   currentPage = p;
   const seq = ++requestSeq;
@@ -259,7 +278,8 @@ async function goPage(p) {
 }
 
 function openDownload() {
-  QMDDownload.open(filters, { distinct: distinctTotal, labelings: labeledTotal }, scope);
+  QMDDownload.open(filters, { distinct: distinctTotal, labelings: labeledTotal,
+                              lowerBound: totalIsLowerBound }, scope);
 }
 
 function setScope(s) {

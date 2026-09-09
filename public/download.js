@@ -15,6 +15,7 @@
 
   let _filters = {};
   let _counts = { distinct: null, labelings: null };
+  let _lowerBound = false;
 
   function activeFilters(f) {
     return Object.entries(f || {}).filter(([, v]) => v !== '' && v != null);
@@ -104,14 +105,18 @@
     const noun = scope === 'labelings' ? 'labeled quiver' : 'quiver';
     const cntTxt = (c == null)
       ? (scope === 'labelings' ? 'labeled quivers' : 'quivers')
-      : `<b>${Number(c).toLocaleString()}</b> ${noun}${c === 1 ? '' : 's'}`;
+      : `<b>${Number(c).toLocaleString()}${_lowerBound ? '+' : ''}</b> ${noun}${c === 1 && !_lowerBound ? '' : 's'}`;
     const cut = n === 0 ? 'the full dataset (no filters)' : 'your current filter cut';
     document.getElementById('dl-sub').innerHTML = `Exporting ${cntTxt} — ${cut}.`;
   }
 
-  // counts: a number (same for both) or { distinct, labelings }.
+  // counts: a number (same for both) or { distinct, labelings, lowerBound }.
+  // lowerBound marks a count the API capped (total_is_lower_bound); the export
+  // itself is unaffected -- it streams the whole cut either way -- so this only
+  // changes "12,345 quivers" into "10,000+ quivers" rather than overstating it.
   function open(filters, counts, initialScope) {
     _filters = filters || {};
+    _lowerBound = false;
     if (counts == null) {
       _counts = { distinct: null, labelings: null };
     } else if (typeof counts === 'number') {
@@ -121,6 +126,7 @@
         distinct:  counts.distinct  == null ? null : counts.distinct,
         labelings: counts.labelings == null ? null : counts.labelings,
       };
+      _lowerBound = !!counts.lowerBound;
     }
     const scope = initialScope === 'labelings' ? 'labelings' : 'distinct';
     document.querySelectorAll('.dl-seg[data-group="scope"] .seg').forEach(b =>
