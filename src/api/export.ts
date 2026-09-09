@@ -8,7 +8,7 @@
  *                      the X-Next-Cursor response header back as ?cursor=
  *                      (limit <= 5000 rows per response; omit to stream all)
  *
- * Order: rank ascending, then shard, then id (rowid) — resumable but not a
+ * Order: rank ascending, then id (seq) — resumable but not a
  * global id order across the shards of a split rank.
  */
 
@@ -16,13 +16,13 @@ import { and, eq, sql } from "drizzle-orm";
 import { Hono, type Context } from "hono";
 import { decodeUpper } from "../db/matrix";
 import { classNicknames as nick, downloads, labelings as lab, mutationClasses as mc, quivers as q } from "../db/schema";
-import { ALL_SHARDS, dbOf, mainDb, shardsForRank, type Database, type Shard } from "../db/shard";
+import { mainDb, type Database } from "../db/shard";
 import { afterKey, decodeCursor, encodeCursor, orderBy, type Dir, type Key, type KeyCol } from "./cursor";
 import { BadRequest, parseInteger } from "./errors";
 import { filterConditions, filtersAsRecord, parseFilters, type ListFilters } from "./quivers";
 
 const PAGE = 500;
-const Q_ROWID = sql`${q}.rowid`;
+const Q_SEQ = q.seq;
 
 export const EXPORT_COLUMNS = [
   "qmd_id", "num_vertices", "exchange_matrix", "representation_type",
@@ -50,7 +50,7 @@ function csvLine(row: Record<string, unknown>): string {
 }
 
 const EXPORT_SELECTION = {
-  rowid: sql<number>`${q}.rowid`,
+  seq: q.seq,
   id: q.id, n: q.n, exchangeMatrix: q.exchangeMatrix,
   representationType: q.representationType, maxEdge: q.maxEdge,
   isAcyclic: q.isAcyclic, isConnected: q.isConnected,
@@ -68,7 +68,7 @@ const EXPORT_SELECTION = {
 type ExportRow = Awaited<ReturnType<typeof fetchDistinctPage>>[number];
 
 function fetchDistinctPage(db: Database, filters: ListFilters, after: Key | undefined, limit: number) {
-  const cols: KeyCol[] = [q.n, Q_ROWID];
+  const cols: KeyCol[] = [q.n, Q_SEQ];
   const dirs: Dir[] = ["asc", "asc"];
   const conds = filterConditions(filters);
   if (after) conds.push(afterKey(cols, dirs, after));
@@ -79,7 +79,7 @@ function fetchDistinctPage(db: Database, filters: ListFilters, after: Key | unde
 }
 
 function fetchLabelingsPage(db: Database, filters: ListFilters, after: Key | undefined, limit: number) {
-  const cols: KeyCol[] = [q.n, Q_ROWID, lab.ord];
+  const cols: KeyCol[] = [q.n, Q_SEQ, lab.ord];
   const dirs: Dir[] = ["asc", "asc", "asc"];
   const conds = filterConditions(filters);
   if (after) conds.push(afterKey(cols, dirs, after));
@@ -127,38 +127,34 @@ export function exportRow(r: ExportRow, matrix?: string): Record<string, unknown
 }
 
 /**
- * Walk a cut in export order across shards. The resume key is
- * [shardIndex, n, rowid(, ord)]: shard index into the ordered shard list for
- * the cut, then the per-shard keyset key.
+ * Walk a cut in export order. The resume key is the keyset key itself,
+ * [n, seq] or [n, seq, ord] -- the leading shard index died with the shards,
+ * which is one of the reasons the cursor version was bumped (src/api/cursor.ts).
  */
 async function* iterateRows(env: Env, filters: ListFilters, scope: string,
                             start: Key | undefined, max: number | null) {
-  const shards: Shard[] = filters.rank !== undefined ? shardsForRank(filters.rank) : ALL_SHARDS;
-  let si = start ? (start[0] as number) : 0;
-  let after: Key | undefined = start ? start.slice(1) : undefined;
+  const db = mainDb(env);
+  let after: Key | undefined = start;
   let emitted = 0;
-  for (; si < shards.length; si++, after = undefined) {
-    const db = dbOf(env, shards[si]!);
-    for (;;) {
-      const want = max === null ? PAGE : Math.min(PAGE, max - emitted);
-      if (want <= 0) return;
-      if (scope === "labelings") {
-        const page = await fetchLabelingsPage(db, filters, after, want);
-        for (const r of page) {
-          after = [r.n, r.rowid, r.ord];
-          emitted += 1;
-          yield [exportRow(r, r.labMatrix), [si, ...after] as Key] as const;
-        }
-        if (page.length < want) break;
-      } else {
-        const page = await fetchDistinctPage(db, filters, after, want);
-        for (const r of page) {
-          after = [r.n, r.rowid];
-          emitted += 1;
-          yield [exportRow(r), [si, ...after] as Key] as const;
-        }
-        if (page.length < want) break;
+  for (;;) {
+    const want = max === null ? PAGE : Math.min(PAGE, max - emitted);
+    if (want <= 0) return;
+    if (scope === "labelings") {
+      const page = await fetchLabelingsPage(db, filters, after, want);
+      for (const r of page) {
+        after = [r.n, r.seq, r.ord];
+        emitted += 1;
+        yield [exportRow(r, r.labMatrix), after as Key] as const;
       }
+      if (page.length < want) return;
+    } else {
+      const page = await fetchDistinctPage(db, filters, after, want);
+      for (const r of page) {
+        after = [r.n, r.seq];
+        emitted += 1;
+        yield [exportRow(r), after as Key] as const;
+      }
+      if (page.length < want) return;
     }
   }
 }
@@ -173,8 +169,11 @@ function logDownload(c: Context<{ Bindings: Env }>, fmt: string,
     ?? c.req.header("x-forwarded-for")?.split(",")[0]?.trim() ?? null;
   return async () => {
     try {
+      // createdAt is omitted deliberately: the Postgres column is
+      // `timestamptz NOT NULL DEFAULT now()`, so the database stamps it. The D1
+      // version sent a Worker-formatted string because SQLite had no default
+      // worth trusting; server time is both simpler and more accurate.
       await mainDb(c.env).insert(downloads).values({
-        createdAt: new Date().toISOString().replace("T", " ").slice(0, 19),
         fmt, rowCount: rowCount(), filters: loggedFilters,
         email: email?.slice(0, 254) ?? null, name: name?.slice(0, 254) ?? null,
         ip, userAgent: c.req.header("user-agent") ?? null, referer: c.req.header("referer") ?? null,

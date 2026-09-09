@@ -4,9 +4,10 @@
  * The list envelope and item shapes mirror the legacy FastAPI backend
  * (qmd_id, num_vertices, exchange_matrix, class_size (null => ∞), ...) with
  * additive phase-2/3 fields (nickname, exploration, mutation_finite,
- * next_cursor). Matrices are stored compactly and decoded here. Lists run
- * per shard (src/db/shard.ts) and are merged by sort key (src/api/merge.ts);
- * the rowid is the unique tiebreak (rows are inserted in id order per rank).
+ * next_cursor). Matrices are stored compactly and decoded here. Lists are a
+ * single keyset-paged query against the one Postgres database; `seq` is the
+ * unique tiebreak, assigned at load so that (n, seq) is id order. Both the
+ * per-shard fan-out and the JS merge that went with it died at the cutover.
  */
 
 import { and, eq, gt, lte, sql, type SQL } from "drizzle-orm";
@@ -20,15 +21,15 @@ import {
   rankStats,
   type Matrix,
 } from "../db/schema";
-import { dbForId, dbOf, mainDb, shardsForRank, type Database, type Shard } from "../db/shard";
-import { afterKey, decodeCursor, encodeCursor, orderBy, type Dir, type Key, type KeyCol } from "./cursor";
+import { dbForId, mainDb, type Database } from "../db/shard";
+import { afterKey, decodeCursor, encodeCursor, keysetPage, orderBy,
+         type Dir, type Key, type KeyCol } from "./cursor";
 import { BadRequest, parseBool, parseDir, parseInteger, parsePaging, parseTotalMode,
          type TotalMode } from "./errors";
-import { mergeShards } from "./merge";
 
 export { BadRequest } from "./errors";
 
-const Q_ROWID = sql`${q}.rowid`;
+const Q_SEQ = q.seq;
 
 // ---------------------------------------------------------------------------
 // Filters
@@ -134,11 +135,11 @@ export function parseSort(sort: string | undefined): SortKey {
   return key as SortKey;
 }
 
-/** ORDER BY columns for a sort: the sort column, then (n, rowid) as the unique tiebreak. */
+/** ORDER BY columns for a sort: the sort column, then (n, seq) as the unique tiebreak. */
 function sortColumns(key: SortKey, dir: Dir): { cols: KeyCol[]; dirs: Dir[] } {
-  if (key === "num_vertices") return { cols: [q.n, Q_ROWID], dirs: [dir, "asc"] };
+  if (key === "num_vertices") return { cols: [q.n, Q_SEQ], dirs: [dir, "asc"] };
   if (key === "qmd_id") return { cols: [q.id], dirs: [dir] };
-  return { cols: [SORT_COLUMNS[key], q.n, Q_ROWID], dirs: [dir, "asc", "asc"] };
+  return { cols: [SORT_COLUMNS[key], q.n, Q_SEQ], dirs: [dir, "asc", "asc"] };
 }
 
 // ---------------------------------------------------------------------------
@@ -146,7 +147,7 @@ function sortColumns(key: SortKey, dir: Dir): { cols: KeyCol[]; dirs: Dir[] } {
 // ---------------------------------------------------------------------------
 
 export const LIST_SELECTION = {
-  rowid: sql<number>`${q}.rowid`,
+  seq: q.seq,
   id: q.id,
   n: q.n,
   exchangeMatrix: q.exchangeMatrix,
@@ -167,7 +168,7 @@ export const LIST_SELECTION = {
 };
 
 export type ListRow = {
-  rowid: number; id: string; n: number; exchangeMatrix: string; maxEdge: number;
+  seq: number | null; id: string; n: number; exchangeMatrix: string; maxEdge: number;
   isAcyclic: boolean; isConnected: boolean; isBipartite: boolean | null;
   labelingCount: number | null; mutationFinite: boolean | null; representationType: string | null;
   mcId: string | null; mcIsOpen: boolean | null; mcExploration: string | null;
@@ -218,7 +219,7 @@ function keyValue(row: ListRow, col: unknown): string | number | null {
     case mc.classSize: return row.mcClassSize;
     case mc.dynkinType: return row.mcDynkinType;
     case mc.isOpen: return row.mcIsOpen === null ? null : Number(row.mcIsOpen);
-    case Q_ROWID: return row.rowid;
+    case Q_SEQ: return row.seq;
     default: throw new Error("unknown key column");
   }
 }
@@ -278,16 +279,9 @@ async function totalsFor(env: Env, f: ListFilters, where: SQL | undefined,
       capped: false,
     };
   }
-  const per = await Promise.all(shardsForRank(f.rank)
-    .map((s) => countIn(dbOf(env, s), where, mode)));
-  return {
-    distinct: per.reduce((a, r) => a + r.distinct, 0),
-    labeled: per.reduce((a, r) => a + r.labeled, 0),
-    capped: per.some((r) => r.capped),
-  };
+  return countIn(mainDb(env), where, mode);
 }
 
-/** One shard's contribution to `totalsFor`. */
 async function countIn(db: Database, where: SQL | undefined, mode: TotalMode): Promise<Totals> {
   if (mode === "exact") {
     const r = (await db
@@ -316,7 +310,6 @@ export async function listQuivers(env: Env, p: ListParams) {
   const sortKey = parseSort(p.sort);
   const dir = parseDir(p.dir);
   const where = conds.length ? and(...conds) : undefined;
-  const shards = shardsForRank(p.filters.rank);
 
   // Validate before starting any query, so no promise is left dangling on throw.
   if (p.scope === "labelings" && (sortKey !== "num_vertices" || dir !== "asc")) {
@@ -330,18 +323,17 @@ export async function listQuivers(env: Env, p: ListParams) {
   const totalsP = totalsFor(env, p.filters, where, p.total);
 
   if (p.scope === "labelings") {
-    const [totals, r] = await Promise.all([totalsP, listLabelings(env, shards, conds, p)]);
+    const [totals, r] = await Promise.all([totalsP, listLabelings(env, conds, p)]);
     return { items: r.items, total: totals.labeled, distinct_total: totals.distinct,
              labeled_total: totals.labeled, total_is_lower_bound: totals.capped,
              next_cursor: r.next_cursor };
   }
 
   const { cols, dirs } = sortColumns(sortKey, dir);
-  const [totals, r] = await Promise.all([totalsP, mergeShards<ListRow>({
-    shardKeys: shards.map((s) => s.key),
+  const [totals, r] = await Promise.all([totalsP, keysetPage<ListRow>({
     dirs,
     keyOf: (row) => cols.map((c) => keyValue(row, c)),
-    fetch: async (sk, after, limit) => (await baseQuery(dbOf(env, shards.find((s) => s.key === sk)!))
+    fetch: async (after, limit) => (await baseQuery(mainDb(env))
       .where(after ? and(where, afterKey(cols, dirs, after)) : where)
       .orderBy(...orderBy(cols, dirs)).limit(limit)) as ListRow[],
     limit: p.limit, offset: p.offset, cursor: p.cursor,
@@ -358,17 +350,16 @@ export async function listQuivers(env: Env, p: ListParams) {
 
 /**
  * "labelings" scope: one row per labeled matrix (complete classes only),
- * from the labelings table in (n, quiver rowid, ord) order. Key: [n, rowid, ord].
+ * from the labelings table in (n, quiver seq, ord) order. Key: [n, seq, ord].
  */
-async function listLabelings(env: Env, shards: Shard[], conds: SQL[], p: ListParams) {
-  const cols: KeyCol[] = [q.n, Q_ROWID, lab.ord];
+async function listLabelings(env: Env, conds: SQL[], p: ListParams) {
+  const cols: KeyCol[] = [q.n, Q_SEQ, lab.ord];
   const dirs: Dir[] = ["asc", "asc", "asc"];
   type Row = ListRow & { ord: number; labMatrix: string };
-  const r = await mergeShards<Row>({
-    shardKeys: shards.map((s) => s.key),
+  const r = await keysetPage<Row>({
     dirs,
-    keyOf: (row) => [row.n, row.rowid, row.ord],
-    fetch: async (sk, after, limit) => (await dbOf(env, shards.find((s) => s.key === sk)!)
+    keyOf: (row) => [row.n, row.seq, row.ord],
+    fetch: async (after, limit) => (await mainDb(env)
       .select({ ...LIST_SELECTION, ord: lab.ord, labMatrix: lab.matrix })
       .from(lab).innerJoin(q, eq(q.id, lab.qmdId))
       .leftJoin(mc, eq(q.mutationClassId, mc.id)).leftJoin(nick, eq(nick.mcId, mc.id))

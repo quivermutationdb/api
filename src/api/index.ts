@@ -17,7 +17,7 @@ import { asc } from "drizzle-orm";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { rankStats } from "../db/schema";
-import { mainDb } from "../db/shard";
+import { createPool, mainDb, withDb } from "../db/shard";
 import { classesRoutes } from "./classes";
 import { BadRequest, Unavailable } from "./errors";
 import { exportRoutes } from "./export";
@@ -37,6 +37,37 @@ api.use("*", async (c, next) => {
   await next();
   if (c.req.method === "GET" && c.res.status === 200 && !c.res.headers.has("Cache-Control")) {
     c.res.headers.set("Cache-Control", "public, max-age=300");
+  }
+});
+
+/**
+ * One Postgres pool per request, handed to the handlers on a shallow copy of
+ * env, and closed after the response.
+ *
+ * `waitUntil` rather than an inline await: a streamed export finishes writing
+ * after the handler returns, so ending the pool synchronously would cut the
+ * stream. `/health` is exempt so that a liveness probe never opens a
+ * connection -- it is what tells us the Worker is up when the database is not.
+ *
+ * A pool exhaustion or connect failure surfaces as `Unavailable` -> 503 with
+ * Retry-After, never as an untyped 500. A PS-40 allows only 25 connections,
+ * and an agent following /llms.txt must be able to tell "back off" from
+ * "give up".
+ */
+api.use("*", async (c, next) => {
+  if (c.req.path === "/api/health") return next();
+  let pool;
+  try {
+    pool = createPool(c.env);
+  } catch (e) {
+    console.error("pool creation failed", e);
+    throw new Unavailable("database is not reachable");
+  }
+  c.env = withDb(c.env, pool);
+  try {
+    await next();
+  } finally {
+    c.executionCtx.waitUntil(pool.end().catch((e) => console.error("pool.end failed", e)));
   }
 });
 

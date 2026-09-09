@@ -27,64 +27,23 @@
     "run_worker_first": ["/api/*", "/mcp"]
   },
 
-  "d1_databases": [
-    {
-      "binding": "DB",
-      "database_name": "qmd",
-      "database_id": "9b44dc6c-a114-4bf5-8c4d-bb24f9dacde8",
-      // Drizzle writes migrations here (drizzle.config.ts `out`); wrangler
-      // applies them with `d1 migrations apply`.
-      "migrations_dir": "drizzle"
-    },
-    // Rank 6 is split across four databases (data/shards.json), one per
-    // id-hash bucket, so each shard's initial load fits a month's included D1
-    // writes. Same migrations on every shard (scripts/migrate-all.sh), then
-    // scripts/trim-shard-indexes.sh drops the indexes a single-rank shard does
-    // not need.
-    {
-      "binding": "DB_N6_0",
-      "database_name": "qmd-n6-0",
-      "database_id": "69ab9e0e-8805-47d4-811b-8fbfd0b982a2",
-      "migrations_dir": "drizzle"
-    },
-    {
-      "binding": "DB_N6_1",
-      "database_name": "qmd-n6-1",
-      "database_id": "784c9b75-9128-4856-909a-141622dbee73",
-      "migrations_dir": "drizzle"
-    },
-    {
-      "binding": "DB_N6_2",
-      "database_name": "qmd-n6-2",
-      "database_id": "fa73060a-bc97-447f-a0b2-36d1ff5e8240",
-      "migrations_dir": "drizzle"
-    },
-    {
-      "binding": "DB_N6_3",
-      "database_name": "qmd-n6-3",
-      "database_id": "2068ac37-3699-43dd-b4ee-150ea91d2662",
-      "migrations_dir": "drizzle"
-    }
-  ],
-
   // PlanetScale Postgres, reached through Hyperdrive (pooling + edge cache).
   // Created from the Cloudflare dashboard 2026-09-09 so it bills to the ICARM
-  // Cloudflare account; docs/PLANETSCALE.md is the migration plan.
+  // Cloudflare account; docs/PLANETSCALE.md is the migration record.
   //
-  // Declared but NOT YET USED: the Worker still reads D1 above. An unused
-  // binding costs nothing at runtime, and having it here means `cf-typegen`
-  // types `env.HYPERDRIVE` for the port (Phase 3). Do not remove the D1
-  // bindings until cutover -- they are the rollback.
+  // THE database as of the 2026-09-09 cutover. The five D1 bindings that stood
+  // here (qmd + qmd-n6-0..3) are gone; the D1 databases themselves still exist
+  // and are the rollback until they are deliberately deleted.
+  //
+  // localConnectionString is what `wrangler dev` and CI connect to; `id` is
+  // used only in production. Override it per-machine with the
+  // CLOUDFLARE_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE variable rather
+  // than editing this file.
   //
   // Caching is ON by default (60 s, 1 h max) and is NOT invalidated by writes,
   // so after a data release the cache serves the previous census until it
   // expires. Decide deliberately: short max_age, or rotate the config as a
   // release step (docs/PLANETSCALE.md, "Sticking points").
-  // localConnectionString is REQUIRED even though no code reads this binding:
-  // `wrangler dev` refuses to start a Hyperdrive binding without a local
-  // Postgres to emulate against, so omitting it breaks local dev and CI. It is
-  // only dialled if the binding is actually used, so a dev box with no Postgres
-  // is fine; point it at a real local database once the port begins.
   "hyperdrive": [
     {
       "binding": "HYPERDRIVE",

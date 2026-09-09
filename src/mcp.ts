@@ -13,8 +13,8 @@ import { asc } from "drizzle-orm";
 import { z } from "zod";
 import { classDetail, classLabelings, classListParamsFrom, classQuivers, listClasses, slugToId } from "./api/classes";
 import { listParamsFrom, listQuivers, quiverDetail, quiverLabelings } from "./api/quivers";
-import { classNicknames as nick, mutationClasses as mc, rankStats } from "./db/schema";
-import { dbForId, mainDb } from "./db/shard";
+import { classNicknames as nick, mutationClasses as mc, quivers as q, rankStats } from "./db/schema";
+import { createPool, dbForId, mainDb, withDb } from "./db/shard";
 import { eq } from "drizzle-orm";
 import { lookupMatrix } from "./api/lookup";
 
@@ -97,10 +97,10 @@ export function createQmdServer(env: Env) {
     inputSchema: { id: z.string(), ...PAGING },
   }, async ({ id, limit, cursor }) => {
     const db = dbForId(env, id);
-    const row = db ? (await db.select({ mcId: mc.id }).from(mc).where(eq(mc.id, id)))[0] : undefined;
-    const qrow = db ? (await db.select({ mcId: (await import("./db/schema")).quivers.mutationClassId }).from((await import("./db/schema")).quivers).where(eq((await import("./db/schema")).quivers.id, id)))[0] : undefined;
+    const qrow = db
+      ? (await db.select({ mcId: q.mutationClassId }).from(q).where(eq(q.id, id)))[0]
+      : undefined;
     if (!db || !qrow) return fail(`No quiver ${id}`);
-    void row;
     return json({ qmd_id: id, ...(await quiverLabelings(env, id, qrow.mcId, cursor, limit ?? 100)) });
   });
 
@@ -170,6 +170,20 @@ export function createQmdServer(env: Env) {
   return server;
 }
 
+/**
+ * The MCP endpoint shares the API's per-request pool lifecycle. The tools call
+ * the very same functions as the HTTP routes (listQuivers, quiverDetail, ...),
+ * so they need the same handle on env; without this they would throw
+ * "withDb middleware did not run" on the first tool call.
+ */
 export function mcpHandler(env: Env) {
-  return createMcpHandler(() => createQmdServer(env), { route: "/mcp" });
+  return async (req: Request, _env: Env, ctx: ExecutionContext): Promise<Response> => {
+    const pool = createPool(env);
+    try {
+      return await createMcpHandler(() => createQmdServer(withDb(env, pool)),
+                                    { route: "/mcp" })(req, env, ctx);
+    } finally {
+      ctx.waitUntil(pool.end().catch((e) => console.error("pool.end failed", e)));
+    }
+  };
 }

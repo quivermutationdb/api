@@ -1,10 +1,14 @@
--- Post-load verification for the Postgres census. Run after
--- drizzle-pg/0002_indexes.sql and 0003_rank8_dangling_class_refs.sql:
+-- STRUCTURAL verification of a Postgres load. Dataset-agnostic on purpose: it
+-- asserts things that must hold of ANY correct load, so CI can run it against
+-- the small dev cell and a release can run it against the full census.
 --   psql -f scripts/pg-verify.sql
+-- The census-specific numbers (50,828,164 rows, 19 finite rank-8 classes,
+-- E6^(1,1), ...) live in scripts/pg-verify-census.sql -- do not merge the two,
+-- or CI will start asserting row counts it cannot possibly have.
 -- Everything marked 'must be' is a hard expectation; a false or a nonzero
 -- orphan count means the load is wrong, not merely surprising.
 
-\echo '=== row counts by rank (must total 50,828,164) ==='
+\echo '=== row counts by rank ==='
 SELECT n, count(*) AS quivers FROM quivers GROUP BY n ORDER BY n;
 SELECT count(*) AS total_quivers FROM quivers;
 SELECT count(*) AS mutation_classes FROM mutation_classes;
@@ -21,18 +25,6 @@ FROM quivers GROUP BY n ORDER BY n;
 SELECT n, bool_and(ok) AS seq_is_id_order FROM (
   SELECT n, seq = row_number() OVER (PARTITION BY n ORDER BY id) AS ok FROM quivers
 ) x GROUP BY n ORDER BY n;
-
-\echo '=== the mathematically load-bearing rows ==='
-SELECT 'rank-8 finite classes (must be 19)' AS check, count(*)::text AS value
-  FROM mutation_classes WHERE n = 8 AND is_finite_confirmed;
-SELECT 'E6^(1,1) present, 49 quivers', coalesce(distinct_quiver_count::text, 'MISSING')
-  FROM mutation_classes WHERE id = 'MC.n8.e9303af7e4328df4';
-SELECT 'rank-6 mutation-finite quivers (must be 428)', count(*)::text
-  FROM quivers WHERE n = 6 AND mutation_finite;
-SELECT 'rank-6 finite classes (must be 13)', count(*)::text
-  FROM mutation_classes WHERE n = 6 AND is_finite_confirmed;
-SELECT 'Markov not mutation-acyclic', is_mutation_acyclic::text
-  FROM mutation_classes WHERE id = 'MC.n3.7405511b230b7552';
 
 \echo '=== referential integrity ==='
 SELECT count(*) AS orphan_labelings FROM labelings l
@@ -65,8 +57,9 @@ LEFT JOIN (SELECT n, count(*) actual_quivers FROM quivers GROUP BY n) q ON q.n =
 LEFT JOIN (SELECT n, count(*) actual_classes FROM mutation_classes GROUP BY n) c ON c.n = r.n
 ORDER BY r.n;
 
-\echo '=== every rank has a rank_stats row (must be 8) ==='
-SELECT count(*) AS ranks_with_stats FROM rank_stats;
+\echo '=== every loaded rank has a rank_stats row (must be 0 missing) ==='
+SELECT count(*) AS ranks_without_stats FROM (
+  SELECT DISTINCT n FROM quivers EXCEPT SELECT n FROM rank_stats) x;
 
 \echo '=== dangling class references (must be 0; see drizzle-pg/0003) ==='
 SELECT count(*) AS dangling_class_refs FROM quivers q

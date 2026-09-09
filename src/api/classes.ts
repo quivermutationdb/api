@@ -15,17 +15,17 @@ import {
   quivers as q,
   rankStats,
 } from "../db/schema";
-import { dbForId, dbOf, mainDb, rankFromId, shardsForRank, type Database } from "../db/shard";
-import { afterKey, decodeCursor, encodeCursor, orderBy, type Dir, type Key, type KeyCol } from "./cursor";
+import { dbForId, mainDb, rankFromId, type Database } from "../db/shard";
+import { afterKey, decodeCursor, encodeCursor, keysetPage, orderBy,
+         type Dir, type Key, type KeyCol } from "./cursor";
 import { BadRequest, parseBool, parseDir, parseInteger, parsePaging } from "./errors";
-import { mergeShards } from "./merge";
 
 export const classesRoutes = new Hono<{ Bindings: Env }>();
 
 export const LABELED_INLINE_MAX = 200;
 const MEMBERS_PAGE = 100;
-const MC_ROWID = sql`${mc}.rowid`;
-const Q_ROWID = sql`${q}.rowid`;
+const MC_SEQ = mc.seq;
+const Q_SEQ = q.seq;
 
 // ---------------------------------------------------------------------------
 // Browse list
@@ -42,7 +42,7 @@ const CLASS_SORT = {
 type ClassSortKey = keyof typeof CLASS_SORT;
 
 const CLASS_SELECTION = {
-  rowid: sql<number>`${mc}.rowid`,
+  seq: mc.seq,
   id: mc.id, n: mc.n, label: mc.label, dynkinType: mc.dynkinType,
   isOpen: mc.isOpen, exploration: mc.exploration, classSize: mc.classSize,
   distinctQuiverCount: mc.distinctQuiverCount, mergedOrbitCount: mc.mergedOrbitCount,
@@ -123,27 +123,27 @@ export async function listClasses(env: Env, p: ClassListParams) {
     throw new BadRequest(`sort must be one of ${Object.keys(CLASS_SORT).join(", ")}`);
   }
   const dir = parseDir(p.dir);
-  const cols: KeyCol[] = sortKey === "num_vertices" ? [mc.n, MC_ROWID]
-    : sortKey === "mc_id" ? [mc.id] : [CLASS_SORT[sortKey], mc.n, MC_ROWID];
+  const cols: KeyCol[] = sortKey === "num_vertices" ? [mc.n, MC_SEQ]
+    : sortKey === "mc_id" ? [mc.id] : [CLASS_SORT[sortKey], mc.n, MC_SEQ];
   const dirs: Dir[] = cols.map((_, i) => (i === 0 ? dir : "asc"));
   const where = conds.length ? and(...conds) : undefined;
-  const shards = shardsForRank(p.rank);
-
   const onlyRank = conds.length === (p.rank !== undefined ? 1 : 0);
+  // No cap here, unlike the quivers list: mutation_classes is 327,961 rows in
+  // 190 MB, so an exact count over any filter is an index scan measured in
+  // milliseconds. The cap exists for the 42.5 M-row quivers heap, not for this.
   const total = onlyRank
     ? (await mainDb(env).select().from(rankStats)
         .where(p.rank !== undefined ? eq(rankStats.n, p.rank) : undefined))
         .reduce((a, r) => a + Number(r.classCount), 0)
-    : (await Promise.all(shards.map((s) => dbOf(env, s).select({ n: sql<number>`count(*)` }).from(mc)
-        .leftJoin(nick, eq(nick.mcId, mc.id)).where(where))))
-        .reduce((a, r) => a + Number(r[0]?.n ?? 0), 0);   // bigint arrives as a string
+    : Number((await mainDb(env).select({ n: sql<number>`count(*)` }).from(mc)
+        .leftJoin(nick, eq(nick.mcId, mc.id)).where(where))[0]?.n ?? 0);  // bigint arrives as a string
 
   const keyOf = (r: ClassRow): Key => cols.map((c) => c === mc.id ? r.id : c === mc.n ? r.n
     : c === mc.classSize ? r.classSize : c === mc.distinctQuiverCount ? r.distinctQuiverCount
-    : c === mc.dynkinType ? r.dynkinType : c === mc.isOpen ? Number(r.isOpen) : r.rowid);
-  const r = await mergeShards<ClassRow>({
-    shardKeys: shards.map((s) => s.key), dirs, keyOf,
-    fetch: (sk, after, limit) => selectClasses(dbOf(env, shards.find((s) => s.key === sk)!))
+    : c === mc.dynkinType ? r.dynkinType : c === mc.isOpen ? Number(r.isOpen) : r.seq);
+  const r = await keysetPage<ClassRow>({
+    dirs, keyOf,
+    fetch: (after, limit) => selectClasses(mainDb(env))
       .where(and(where, after ? afterKey(cols, dirs, after) : undefined))
       .orderBy(...orderBy(cols, dirs)).limit(limit),
     limit: p.limit, offset: p.offset, cursor: p.cursor,
@@ -160,16 +160,15 @@ classesRoutes.get("/", async (c) => {
 // ---------------------------------------------------------------------------
 
 /**
- * Distinct quivers of a class, most-labeled first then rowid. Page 1 pins the
- * canonical quiver at the top; later pages exclude it. Key: [labeling_count, rowid].
+ * Distinct quivers of a class, most-labeled first then seq. Page 1 pins the
+ * canonical quiver at the top; later pages exclude it. Key: [labeling_count, seq].
  */
 export async function classQuivers(env: Env, mcId: string, canonicalQid: string | null,
                                    cursor: string | undefined, limit: number) {
   const n = rankFromId(mcId) ?? 0;
-  const shards = shardsForRank(n);
-  const cols: KeyCol[] = [q.labelingCount, Q_ROWID];
+  const cols: KeyCol[] = [q.labelingCount, Q_SEQ];
   const dirs: Dir[] = ["desc", "asc"];
-  type Row = { rowid: number; id: string; m: string; lc: number | null };
+  type Row = { seq: number | null; id: string; m: string; lc: number | null };
   const items: { qmd_id: string; matrix: number[][]; labeling_count: number; is_canonical: boolean }[] = [];
   let take = limit;
   if (!cursor && canonicalQid) {
@@ -181,11 +180,11 @@ export async function classQuivers(env: Env, mcId: string, canonicalQid: string 
       take -= 1;
     }
   }
-  const r = await mergeShards<Row>({
-    shardKeys: shards.map((s) => s.key), dirs,
-    keyOf: (row) => [row.lc, row.rowid],
-    fetch: (sk, after, lim) => dbOf(env, shards.find((s) => s.key === sk)!)
-      .select({ rowid: sql<number>`${q}.rowid`, id: q.id, m: q.exchangeMatrix, lc: q.labelingCount })
+  const r = await keysetPage<Row>({
+    dirs,
+    keyOf: (row) => [row.lc, row.seq],
+    fetch: (after, lim) => mainDb(env)
+      .select({ seq: q.seq, id: q.id, m: q.exchangeMatrix, lc: q.labelingCount })
       .from(q).where(and(eq(q.mutationClassId, mcId),
                          canonicalQid ? ne(q.id, canonicalQid) : undefined,
                          after ? afterKey(cols, dirs, after) : undefined))

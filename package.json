@@ -10,9 +10,9 @@
     "pretypecheck": "wrangler types",
     "typecheck": "tsc --noEmit",
     "cf-typegen": "wrangler types",
-    "db:generate": "drizzle-kit generate",
-    "db:migrate:local": "scripts/migrate-all.sh --local",
-    "db:migrate:remote": "scripts/migrate-all.sh --remote",
+    "db:generate:sqlite": "drizzle-kit generate",
+    "db:load:local": "scripts/pg-load-local.sh",
+    "db:verify": "psql -X -f scripts/pg-verify.sql",
     "test:api": "node scripts/api-smoke.mjs",
     "test:browser": "node scripts/browser-check.mjs"
   },
@@ -21,10 +21,12 @@
     "agents": "^0.22.0",
     "drizzle-orm": "^0.45.2",
     "hono": "^4.13.0",
+    "pg": "^8.23.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1",
+    "@types/pg": "^8.23.1",
     "drizzle-kit": "^0.31.10",
     "typescript": "^7.0.2",
     "wrangler": "^4.118.0"
