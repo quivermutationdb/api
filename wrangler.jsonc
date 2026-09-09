@@ -80,10 +80,16 @@
   // so after a data release the cache serves the previous census until it
   // expires. Decide deliberately: short max_age, or rotate the config as a
   // release step (docs/PLANETSCALE.md, "Sticking points").
+  // localConnectionString is REQUIRED even though no code reads this binding:
+  // `wrangler dev` refuses to start a Hyperdrive binding without a local
+  // Postgres to emulate against, so omitting it breaks local dev and CI. It is
+  // only dialled if the binding is actually used, so a dev box with no Postgres
+  // is fine; point it at a real local database once the port begins.
   "hyperdrive": [
     {
       "binding": "HYPERDRIVE",
-      "id": "3102c79867ae4311b621240f7f200bbe"
+      "id": "3102c79867ae4311b621240f7f200bbe",
+      "localConnectionString": "postgresql://postgres:postgres@localhost:5432/qmd"
     }
   ],
 
