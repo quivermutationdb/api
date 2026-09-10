@@ -94,6 +94,15 @@ const st = await json("/stats");
     check("bad total mode rejected", "detail" in await (await get("/quivers?total=roughly", 400)).json());
   }
 
+  // The scan-requiring sorts are refused only above UNSORTABLE_ABOVE_ROWS
+  // (10M). This dataset is 692 rows, so the guard must stay INERT here -- the
+  // failure mode worth catching is a threshold bug that disables sorting on
+  // every dataset, which no production-sized fixture in CI could reveal.
+  for (const srt of ["max_edge", "class_size", "dynkin_type", "class_type"]) {
+    const r = await json(`/quivers?rank=4&sort=${srt}&limit=5`);
+    check(`sort=${srt} still served on a small cut`, Array.isArray(r.items) && r.items.length === 5);
+  }
+
   const a3 = await json("/search?dynkin_type=A3&limit=5");
   check("A3 class size 14, D4 50", a3.items[0].class_size === 14 && (await json("/search?dynkin_type=D4&limit=1")).items[0].class_size === 50);
   check("bad int -> 400", "detail" in await json("/quivers?rank=abc", 400));

@@ -137,6 +137,35 @@ const SORT_COLUMNS = {
 } as const;
 export type SortKey = keyof typeof SORT_COLUMNS;
 
+/**
+ * Sorts with no index that can serve them on the quivers table.
+ *
+ * `max_edge` has an (n, max_edge) index but the ORDER BY is
+ * (max_edge, n, seq), so the index cannot supply the tiebreak; the other three
+ * live on mutation_classes and need the join resolved before the sort, which
+ * no index on quivers can help with. Each therefore sorts the whole cut.
+ *
+ * Measured end to end on the live database: rank 4 (3.6 M) 1.4-4.7 s, rank 5
+ * (2.4 M) 3.7-5.2 s, rank 7 (2.1 M) 4.2-5.4 s, rank 8 (258 k) ~1.3 s -- poor
+ * but serviceable -- and rank 6 (42.5 M) does not complete at all.
+ */
+const SORTS_WITHOUT_AN_INDEX = new Set<SortKey>(["max_edge", "class_size", "dynkin_type", "class_type"]);
+
+/**
+ * Above this many rows in the cut, those sorts are refused rather than
+ * attempted. 10 M sits above every rank the census has (the largest served is
+ * rank 4 at 3.6 M) and below rank 6's 42.5 M, which is the only cut that
+ * cannot be sorted at all.
+ *
+ * Refusing UP FRONT rather than letting the server-side statement_timeout kill
+ * it is deliberate and not just about latency: a cancelled statement leaves the
+ * connection to be torn down mid-flight, and the resulting socket write-after-
+ * FIN is thrown outside any promise this code can catch -- it killed the whole
+ * isolate in testing, taking every concurrent request with it. The timeout
+ * stays as a backstop; nothing on a normal path should reach it.
+ */
+export const UNSORTABLE_ABOVE_ROWS = 10_000_000;
+
 export function parseSort(sort: string | undefined): SortKey {
   const key = sort ?? "num_vertices";
   if (!Object.hasOwn(SORT_COLUMNS, key)) {
@@ -274,6 +303,13 @@ export const TOTAL_CAP = 10_000;
 
 interface Totals { distinct: number; labeled: number; capped: boolean }
 
+/** Upper bound on the rows a cut can touch, from the ingest-time aggregates. */
+async function cutSize(env: Env, rank: number | undefined): Promise<number> {
+  const rows = await mainDb(env).select().from(rankStats)
+    .where(rank !== undefined ? eq(rankStats.n, rank) : undefined);
+  return rows.reduce((a, r) => a + Number(r.quiverCount), 0);
+}
+
 async function totalsFor(env: Env, f: ListFilters, where: SQL | undefined,
                          mode: TotalMode): Promise<Totals> {
   if (onlyRankFilter(f)) {
@@ -324,6 +360,16 @@ export async function listQuivers(env: Env, p: ListParams) {
   // Validate before starting any query, so no promise is left dangling on throw.
   if (p.scope === "labelings" && (sortKey !== "num_vertices" || dir !== "asc")) {
     throw new BadRequest("scope=labelings supports only the default sort (num_vertices asc)");
+  }
+  if (SORTS_WITHOUT_AN_INDEX.has(sortKey)) {
+    const rows = await cutSize(env, p.filters.rank);
+    if (rows > UNSORTABLE_ABOVE_ROWS) {
+      throw new BadRequest(
+        `sort=${sortKey} is not available on a cut this large (${rows.toLocaleString()} rows): `
+        + "no index can supply that order, so the whole cut would have to be sorted. "
+        + "Use the default sort (num_vertices) or qmd_id, both of which are indexed "
+        + "and page in milliseconds, or narrow the cut with a rank filter first.");
+    }
   }
 
   // Started here, awaited with the page read below. Whenever the filter is not

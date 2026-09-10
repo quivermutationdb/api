@@ -17,7 +17,8 @@ from qmd.core import is_connected, run_generation, to_matrix  # noqa: E402
 from qmd.encoding import decode_upper, encode_upper  # noqa: E402
 
 ROOT = os.path.join(os.path.dirname(__file__), "..")
-SCHEMA_TS = os.path.join(ROOT, "src", "db", "schema.ts")
+SCHEMA_SQLITE_TS = os.path.join(ROOT, "src", "db", "schema.sqlite.ts")
+SCHEMA_PG_TS = os.path.join(ROOT, "src", "db", "schema.ts")
 MIGRATIONS = os.path.join(ROOT, "drizzle")
 D1_STATEMENT_LIMIT = 100_000
 
@@ -38,24 +39,56 @@ def test_upper_encoding_roundtrip():
     assert decode_upper(1, "") == ((0,),)
 
 
-def _schema_columns():
-    src = open(SCHEMA_TS, encoding="utf-8").read()
+def _schema_columns(path, table_fn, col_types):
+    """Column names per table from a Drizzle schema file."""
+    src = open(path, encoding="utf-8").read()
     tables = {}
-    for m in re.finditer(r'sqliteTable\(\s*"(\w+)"', src):
+    for m in re.finditer(table_fn + r'\(\s*"(\w+)"', src):
         start = m.end()
-        nxt = src.find("sqliteTable(", start)
+        nxt = src.find(table_fn + "(", start)
         body = src[start: nxt if nxt != -1 else len(src)]
-        tables[m.group(1)] = re.findall(r'(?:text|integer|real|blob)\(\s*"(\w+)"', body)
+        tables[m.group(1)] = re.findall(r'(?:' + col_types + r')\(\s*"(\w+)"', body)
     return tables
 
 
+def _sqlite_columns():
+    return _schema_columns(SCHEMA_SQLITE_TS, "sqliteTable", "text|integer|real|blob")
+
+
+def _pg_columns():
+    return _schema_columns(SCHEMA_PG_TS, "pgTable",
+                           "text|integer|bigint|boolean|jsonb|timestamp|real")
+
+
 def test_export_columns_match_drizzle_schema():
-    cols = _schema_columns()
+    """The exporter writes the SQLite intermediate; its columns must match it."""
+    cols = _sqlite_columns()
     assert set(d1_export._MC_COLUMNS) == set(cols["mutation_classes"])
     assert set(d1_export._LABELING_COLUMNS) == set(cols["labelings"])
     assert set(d1_export._QUIVER_COLUMNS) == set(cols["quivers"])
     assert set(d1_export._STATS_COLUMNS) == set(cols["rank_stats"])
     assert "frontier_quivers" not in cols and "mutation_class_payloads" not in cols
+
+
+def test_the_two_schemas_carry_the_same_columns():
+    """
+    The Postgres schema (what the Worker serves) and the SQLite one (the
+    pipeline's intermediate) must agree, table for table and column for column.
+
+    Nothing generates one from the other, so a new invariant added to one and
+    forgotten in the other would surface as a column that silently never
+    reaches the API -- or a load that fails at COPY time, halfway through a
+    multi-gigabyte release. `seq` is the one legitimate difference: Postgres
+    has no rowid, so it carries an explicit ordering column the intermediate
+    does not need.
+    """
+    pg, lite = _pg_columns(), _sqlite_columns()
+    assert set(pg) == set(lite), f"tables differ: {set(pg) ^ set(lite)}"
+    for table in sorted(pg):
+        extra_pg = set(pg[table]) - set(lite[table]) - {"seq"}
+        extra_lite = set(lite[table]) - set(pg[table])
+        assert not extra_pg, f"{table}: only in Postgres schema: {sorted(extra_pg)}"
+        assert not extra_lite, f"{table}: only in SQLite schema: {sorted(extra_lite)}"
 
 
 def test_shard_routing_matches_config():

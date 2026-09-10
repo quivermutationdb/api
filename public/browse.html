@@ -122,6 +122,16 @@ let labeledTotal = 0;
 // replaced by prev/next driven by whether the last page came back full.
 let totalIsLowerBound = false;
 let hasMore = false;
+// Sorts with no index that can serve them: max_edge's tiebreak is not in its
+// index, and the three class columns need the join resolved before the sort.
+// The API refuses them above UNSORTABLE_ABOVE_ROWS rows and says why; offering
+// a control that can only return an error is worse than not offering it, so
+// the headers go inert on a cut that large. Keep this threshold in step with
+// UNSORTABLE_ABOVE_ROWS in src/api/quivers.ts.
+const UNSORTABLE_ABOVE_ROWS = 10000000;
+const SORTS_NEEDING_A_SCAN = ['max_edge', 'class_size', 'dynkin_type', 'class_type'];
+let rowsByRank = {};      // n -> quiver_count, from /api/stats
+let totalRows = 0;
 let scope = 'distinct';            // 'distinct' | 'labelings'
 let sortCol = 'num_vertices';
 let sortDir = 'asc';
@@ -310,6 +320,7 @@ function applyFilters() {
   if (rank)      filters.rank = rank;
   if (open)      filters.is_open = open;
   if (dynkin)    filters.dynkin_type = dynkin;
+  applySortAvailability();     // the rank just changed which sorts are servable
   currentPage = 1;
   goPage(1);
 }
@@ -319,6 +330,7 @@ function resetFilters() {
   document.getElementById('filter-open').value = '';
   document.getElementById('filter-dynkin').value = '';
   filters = {};
+  applySortAvailability();
   currentPage = 1;
   goPage(1);
 }
@@ -329,6 +341,7 @@ document.querySelectorAll('th[data-col]').forEach(th => {
     if (e.target.closest('.col-info')) return;   // wiki link, not a sort
     if (scope === 'labelings') return;           // sort disabled in this scope
     const col = th.dataset.col;
+    if (th.classList.contains('sort-unavailable')) return;   // would only 400
     if (sortCol === col) sortDir = sortDir === 'asc' ? 'desc' : 'asc';
     else { sortCol = col; sortDir = 'asc'; }
     document.querySelectorAll('th').forEach(t => t.classList.remove('sorted'));
@@ -339,7 +352,49 @@ document.querySelectorAll('th[data-col]').forEach(th => {
   });
 });
 
+// Per-rank row counts decide which sorts can be offered. One /stats call,
+// cached for the page; a failure just leaves every sort enabled, and the API's
+// own 400 remains the backstop.
+async function loadRankSizes() {
+  try {
+    const st = await (await fetch(`${API}/stats`)).json();
+    rowsByRank = Object.fromEntries((st.by_rank || []).map(r => [String(r.n), r.distinct_quivers]));
+    totalRows = st.distinct_quivers || 0;
+  } catch (e) { console.error('rank sizes unavailable; leaving all sorts enabled', e); }
+  applySortAvailability();
+}
+
+/** Rows the current cut can touch — the filtered rank, or the whole census. */
+function cutRows() {
+  const r = filters.rank;
+  return r ? (rowsByRank[String(r)] ?? 0) : totalRows;
+}
+
+function applySortAvailability() {
+  const tooBig = cutRows() > UNSORTABLE_ABOVE_ROWS;
+  document.querySelectorAll('th[data-col]').forEach(th => {
+    if (!SORTS_NEEDING_A_SCAN.includes(th.dataset.col)) return;
+    const arrow = th.querySelector('.sort-arrow');
+    th.classList.toggle('sort-unavailable', tooBig);
+    if (tooBig) {
+      th.title = 'Sorting by this column is unavailable on a rank this large — '
+        + 'no index can supply that order, so the whole cut would have to be sorted. '
+        + 'Filter to a smaller rank, or sort by Quiver ID or Rank.';
+      if (arrow) arrow.textContent = '';
+    } else {
+      th.removeAttribute('title');
+      if (arrow && !th.classList.contains('sorted')) arrow.textContent = '↕';
+    }
+  });
+  // If the active sort just became unavailable, fall back to the default.
+  if (tooBig && SORTS_NEEDING_A_SCAN.includes(sortCol)) {
+    sortCol = 'num_vertices'; sortDir = 'asc';
+    document.querySelectorAll('th').forEach(t => t.classList.remove('sorted'));
+  }
+}
+
 // Initial load
+loadRankSizes();
 goPage(1);
 </script>
 <section class="llm-help" aria-labelledby="llm-help-title">
