@@ -87,6 +87,7 @@ export function classListItem(r: ClassRow) {
 export interface ClassListParams {
   rank?: number; dynkinType?: string; isOpen?: boolean; isMutationFinite?: boolean;
   isMutationAcyclic?: boolean; orbitMin?: number; orbitMax?: number; nickname?: string;
+  hasNickname?: boolean;
   sort?: string; dir?: string; offset: number; limit: number; cursor?: string;
 }
 
@@ -100,6 +101,7 @@ export function classListParamsFrom(get: (k: string) => string | undefined): Cla
     orbitMin: parseInteger("orbit_min", get("orbit_min")),
     orbitMax: parseInteger("orbit_max", get("orbit_max")),
     nickname: get("nickname") || undefined,
+    hasNickname: parseBool("has_nickname", get("has_nickname")),
     sort: get("sort"), dir: get("dir"), cursor: get("cursor"),
     ...parsePaging(get, 50),
   };
@@ -123,6 +125,11 @@ export async function listClasses(env: Env, p: ClassListParams) {
   if (p.orbitMin !== undefined) conds.push(sql`${mc.classSize} >= ${p.orbitMin}`);
   if (p.orbitMax !== undefined) conds.push(sql`${mc.classSize} <= ${p.orbitMax}`);
   if (p.nickname) conds.push(eq(nick.slug, p.nickname.toLowerCase()));
+  // Mirrors has_nickname on /quivers so the browse page's "Named classes"
+  // filter means the same thing in the classes view as in the quivers view.
+  if (p.hasNickname !== undefined) {
+    conds.push(p.hasNickname ? sql`${nick.slug} is not null` : sql`${nick.slug} is null`);
+  }
 
   const sortKey = (p.sort ?? "num_vertices") as ClassSortKey;
   if (!Object.hasOwn(CLASS_SORT, sortKey)) {

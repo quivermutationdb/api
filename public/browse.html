@@ -69,13 +69,14 @@
     </div>
     <button class="btn" onclick="applyFilters()">Filter</button>
     <button class="btn btn-ghost" onclick="resetFilters()">Reset</button>
-    <button class="btn btn-ghost" onclick="openDownload()">Download ↓</button>
+    <button class="btn btn-ghost" id="btn-download" onclick="openDownload()">Download ↓</button>
   </div>
 
   <div class="browse-controls">
     <div class="orbit-controls" role="group" aria-label="Quiver view">
       <button class="view-btn active" id="btn-distinct" onclick="setScope('distinct')">Distinct quivers</button>
       <button class="view-btn" id="btn-labeled" onclick="setScope('labelings')">Labeled quivers</button>
+      <button class="view-btn" id="btn-classes" onclick="setScope('classes')">Mutation classes</button>
     </div>
     <div class="stats-row" id="stats-row" style="display:none">
       <span>Showing <b id="stat-showing">—</b> <span id="stat-noun">quivers</span></span>
@@ -85,7 +86,7 @@
 
   <div class="table-wrap">
     <table id="quiver-table">
-      <thead>
+      <thead id="thead-quivers">
         <tr>
           <th data-col="qmd_id">Quiver ID <a class="col-info" href="/wiki.html#quiver-id" title="Definition" aria-label="Quiver ID definition">ⓘ</a> <span class="sort-arrow">↕</span></th>
           <th data-col="num_vertices">Rank <a class="col-info" href="/wiki.html#rank" title="Definition" aria-label="Rank definition">ⓘ</a> <span class="sort-arrow">↕</span></th>
@@ -98,6 +99,22 @@
           <th data-col="class_size">Mutation class size <a class="col-info" href="/wiki.html#mutation-class-size" title="Definition" aria-label="Mutation class size definition">ⓘ</a> <span class="sort-arrow">↕</span></th>
           <th>Mutation class <a class="col-info" href="/wiki.html#mutation-class" title="Definition" aria-label="Mutation class definition">ⓘ</a></th>
           <th>Matrix <a class="col-info" href="/wiki.html#quiver" title="Definition" aria-label="Exchange matrix definition">ⓘ</a></th>
+        </tr>
+      </thead>
+      <!-- The mutation-classes view is a different entity, so it gets its own
+           header rather than reusing the quiver columns. Hidden until selected;
+           setScope swaps which thead is shown. -->
+      <thead id="thead-classes" hidden>
+        <tr>
+          <th data-col="mc_id">Class ID <a class="col-info" href="/wiki.html#mutation-class" title="Definition" aria-label="Mutation class id definition">ⓘ</a> <span class="sort-arrow">↕</span></th>
+          <th data-col="num_vertices">Rank <a class="col-info" href="/wiki.html#rank" title="Definition" aria-label="Rank definition">ⓘ</a> <span class="sort-arrow">↕</span></th>
+          <th>Nickname <a class="col-info" href="/wiki.html#nicknames" title="Definition" aria-label="Nickname definition">ⓘ</a></th>
+          <th data-col="dynkin_type">Dynkin type <a class="col-info" href="/wiki.html#dynkin-type" title="Definition" aria-label="Dynkin type definition">ⓘ</a> <span class="sort-arrow">↕</span></th>
+          <th data-col="class_type">Class <a class="col-info" href="/wiki.html#mutation-finite" title="Definition" aria-label="Class type definition">ⓘ</a> <span class="sort-arrow">↕</span></th>
+          <th data-col="distinct_quiver_count">Distinct quivers <a class="col-info" href="/wiki.html#mutation-class" title="Definition" aria-label="Distinct quivers definition">ⓘ</a> <span class="sort-arrow">↕</span></th>
+          <th data-col="class_size">Class size <a class="col-info" href="/wiki.html#mutation-class-size" title="Definition" aria-label="Mutation class size definition">ⓘ</a> <span class="sort-arrow">↕</span></th>
+          <th>Mutation-acyclic <a class="col-info" href="/wiki.html#mutation-acyclic" title="Definition" aria-label="Mutation-acyclic definition">ⓘ</a></th>
+          <th>Exploration <a class="col-info" href="/wiki.html#exploration" title="Definition" aria-label="Exploration definition">ⓘ</a></th>
         </tr>
       </thead>
       <tbody id="table-body">
@@ -138,9 +155,18 @@ let hasMore = false;
 // UNSORTABLE_ABOVE_ROWS in src/api/quivers.ts.
 const UNSORTABLE_ABOVE_ROWS = 10000000;
 const SORTS_NEEDING_A_SCAN = ['max_edge', 'class_size', 'dynkin_type', 'class_type'];
+// Filters the quivers endpoint accepts and the classes endpoint does not.
+// mutation_classes is 327,961 rows, so every class sort is indexed and cheap —
+// SORTS_NEEDING_A_SCAN does not apply to the classes view at all.
+const QUIVER_ONLY_FILTERS = ['max_edge', 'is_acyclic', 'is_connected', 'is_simply_laced',
+                             'representation_type', 'explored', 'scope'];
+const CLASS_SORTS = ['mc_id', 'num_vertices', 'class_size', 'distinct_quiver_count',
+                     'dynkin_type', 'class_type'];
+const QUIVER_SORTS = ['qmd_id', 'num_vertices', 'class_size', 'max_edge',
+                      'dynkin_type', 'class_type'];
 let rowsByRank = {};      // n -> quiver_count, from /api/stats
 let totalRows = 0;
-let scope = 'distinct';            // 'distinct' | 'labelings'
+let scope = 'distinct';            // 'distinct' | 'labelings' | 'classes'
 let sortCol = 'num_vertices';
 let sortDir = 'asc';
 let filters = {};
@@ -170,17 +196,23 @@ async function fetchQuivers(page = 1) {
   const params = new URLSearchParams({
     limit: PAGE_SIZE,
     offset,
-    scope,
     sort: sortCol,
     dir: sortDir,
     ...filters,
   });
+  // /classes has no scope parameter; sending one would be a 400.
+  if (scope !== 'classes') params.set('scope', scope);
+  // Filters that only exist on /quivers would be rejected by /classes.
+  if (scope === 'classes') for (const k of QUIVER_ONLY_FILTERS) params.delete(k);
   // Remove empty params
   for (const [k, v] of [...params.entries()]) {
     if (!v) params.delete(k);
   }
 
-  const res = await fetch(`${API}/quivers?${params}`);
+  // The classes view is a different ENTITY, not another scope of /quivers:
+  // one row per mutation class, from /api/classes. Same filters, same cursor
+  // paging, different columns.
+  const res = await fetch(`${API}/${scope === 'classes' ? 'classes' : 'quivers'}?${params}`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   document.getElementById('api-status').textContent = 'connected';
   return await res.json();
@@ -201,18 +233,38 @@ function renderTable(data) {
   hasMore = !!(data.items && data.items.length === PAGE_SIZE);
   if (data.distinct_total != null) distinctTotal = data.distinct_total;
   if (data.labeled_total != null)  labeledTotal = data.labeled_total;
-  document.getElementById('stat-noun').textContent =
-    scope === 'labelings' ? 'labeled quivers' : 'quivers';
+  const noun = scope === 'labelings' ? 'labeled quivers'
+             : scope === 'classes' ? 'mutation classes' : 'quivers';
+  const cols = scope === 'classes' ? 9 : 11;
+  document.getElementById('stat-noun').textContent = noun;
 
   if (!data.items || data.items.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="11">
+    tbody.innerHTML = `<tr><td colspan="${cols}">
       <div class="state-msg">
         <span class="mono-label">No results</span>
-        No quivers match the current filters.
+        No ${noun} match the current filters.
       </div>
     </td></tr>`;
     document.getElementById('stats-row').style.display = 'none';
     document.getElementById('pagination').innerHTML = '';
+    return;
+  }
+
+  if (scope === 'classes') {
+    tbody.innerHTML = data.items.map(c => `
+      <tr>
+        <td><a href="/class.html?id=${encodeURIComponent(c.mc_id)}">${c.mc_id}</a></td>
+        <td class="mono">${c.num_vertices}</td>
+        <td>${c.nickname ? `<span class="nick">${esc(c.nickname)}</span>` : DASH}</td>
+        <td class="mono">${c.dynkin_type ?? '<span style="color:var(--rule)">—</span>'}</td>
+        <td>${classBadge(c)}</td>
+        <td class="mono">${Number(c.distinct_quiver_count).toLocaleString()}</td>
+        <td class="mono">${classSizeCell(c)}</td>
+        <td class="mono">${yncell(c.is_mutation_acyclic)}</td>
+        <td class="mono">${c.exploration ?? DASH}</td>
+      </tr>
+    `).join('');
+    finishRender(data);
     return;
   }
 
@@ -232,6 +284,20 @@ function renderTable(data) {
     </tr>
   `).join('');
 
+  finishRender(data);
+}
+
+/** Stats row + pager; shared by the quiver and class renderers. */
+function finishRender() {
+  // Stamp what was actually rendered. The browser tests need to know a click
+  // has produced a NEW table rather than the previous one -- without this they
+  // can only wait for "some rows exist", which is true of the stale table too,
+  // and then assert against it. Cheap, and it makes the state inspectable in
+  // devtools as well.
+  const tb = document.getElementById('table-body');
+  tb.dataset.scope = scope;
+  tb.dataset.sort = sortCol;
+  tb.dataset.dir = sortDir;
   const totalPages = totalIsLowerBound ? 0 : Math.ceil(totalCount / PAGE_SIZE);
   document.getElementById('stats-row').style.display = 'flex';
   document.getElementById('stat-showing').textContent =
@@ -305,6 +371,20 @@ function setScope(s) {
   scope = s;
   document.getElementById('btn-distinct').classList.toggle('active', s === 'distinct');
   document.getElementById('btn-labeled').classList.toggle('active', s === 'labelings');
+  document.getElementById('btn-classes').classList.toggle('active', s === 'classes');
+
+  // The classes view lists a different entity, so it needs its own header row.
+  document.getElementById('thead-quivers').hidden = (s === 'classes');
+  document.getElementById('thead-classes').hidden = (s !== 'classes');
+
+  // Sort keys do not carry across: the quiver sorts (qmd_id, max_edge, ...)
+  // are not class sorts, and sending one to /classes is a 400. num_vertices is
+  // the only key both accept, and it is the default in both.
+  if (!(s === 'classes' ? CLASS_SORTS : QUIVER_SORTS).includes(sortCol)) {
+    sortCol = 'num_vertices'; sortDir = 'asc';
+    document.querySelectorAll('th').forEach(t => t.classList.remove('sorted'));
+  }
+
   // The labelings scope is served in (rank, id, labeling) order only — the
   // API refuses other sorts rather than sorting every labeled matrix live.
   if (s === 'labelings') {
@@ -316,6 +396,18 @@ function setScope(s) {
   } else {
     document.querySelectorAll('th[data-col]').forEach(t => t.classList.remove('sort-disabled'));
   }
+
+  // /api/export serves quivers only, so there is nothing to download in the
+  // classes view. Disabling with an explanation beats a button that 400s.
+  const dl = document.getElementById('btn-download');
+  if (dl) {
+    dl.disabled = (s === 'classes');
+    dl.title = s === 'classes'
+      ? 'CSV export covers quivers, not mutation classes — switch to a quiver view to download'
+      : '';
+  }
+
+  applySortAvailability();
   currentPage = 1;
   goPage(1);
 }
@@ -398,7 +490,10 @@ function cutRows() {
 }
 
 function applySortAvailability() {
-  const tooBig = cutRows() > UNSORTABLE_ABOVE_ROWS;
+  // Classes are 327,961 rows with every sort indexed, so the guard is a
+  // quivers-table concern only — applying it there would disable sorts that
+  // are in fact instant.
+  const tooBig = scope !== 'classes' && cutRows() > UNSORTABLE_ABOVE_ROWS;
   document.querySelectorAll('th[data-col]').forEach(th => {
     if (!SORTS_NEEDING_A_SCAN.includes(th.dataset.col)) return;
     const arrow = th.querySelector('.sort-arrow');

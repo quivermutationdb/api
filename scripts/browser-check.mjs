@@ -191,6 +191,7 @@ check("browse: labelings scope lists stored labelings (finite classes only), sor
 // unreachable from the UI while sitting in the database. Assert against
 // /stats rather than against a literal, or the test goes stale the same way.
 const menuStats = stats;   // same payload; named apart from the home-page checks above
+const classesTotal = (await (await fetch(`${BASE}/api/classes?limit=1`)).json()).total;
 const ranks = menuStats.by_rank.map((r) => String(r.n));
 const edgeCeiling = Math.max(0, ...menuStats.by_rank.map((r) => r.bound ?? 0));
 
@@ -223,6 +224,45 @@ await page.waitForFunction(() => {
 const nickCells = await page.$$eval("#table-body tr", (rs) => rs.map((r) => !!r.querySelector(".nick")));
 check("browse: named-classes filter returns only quivers with a nickname",
   nickCells.length > 0 && nickCells.every(Boolean), `${nickCells.filter(Boolean).length}/${nickCells.length}`);
+
+// ---- Mutation classes view ----
+await page.goto(`${BASE}/browse.html`, { waitUntil: "networkidle" });
+await page.waitForFunction(() => document.querySelectorAll("#table-body tr").length > 1, null, { timeout: 15000 });
+await page.click("#btn-classes");
+await page.waitForFunction(() => document.getElementById("table-body").dataset.scope === "classes",
+  null, { timeout: 15000 });
+check("browse: classes view swaps to the class header",
+  await page.locator("#thead-classes").isVisible() && !(await page.locator("#thead-quivers").isVisible()));
+const classLinks = await page.$$eval("#table-body tr td:first-child a",
+  (as) => as.map((a) => a.textContent.trim()));
+check("browse: every row is a mutation class",
+  classLinks.length > 1 && classLinks.every((t) => t.startsWith("MC.n")), classLinks[0]);
+check("browse: noun and counts follow the view",
+  (await page.locator("#stat-noun").textContent()) === "mutation classes"
+    && Number((await page.locator("#stat-showing").textContent()).replace(/[,+]/g, "")) === classesTotal,
+  await page.locator("#stat-showing").textContent());
+check("browse: download disabled in the classes view (CSV export is quivers-only)",
+  await page.locator("#btn-download").isDisabled());
+
+// Sorting must switch key sets: qmd_id is not a class sort and would 400.
+await page.click('#thead-classes th[data-col="distinct_quiver_count"]');
+// Wait for the RENDER, not merely for rows to exist: the previous table is
+// still on screen and would satisfy a row-count wait immediately.
+await page.waitForFunction(() => {
+  const tb = document.getElementById("table-body");
+  return tb.dataset.scope === "classes" && tb.dataset.sort === "distinct_quiver_count";
+}, null, { timeout: 15000 });
+const dqc = await page.$$eval("#table-body tr td:nth-child(6)",
+  (ts) => ts.map((t) => Number(t.textContent.replace(/,/g, ""))));
+check("browse: classes sort by distinct quivers ascending",
+  dqc.length > 1 && dqc.every((v, i) => i === 0 || dqc[i - 1] <= v), dqc.slice(0, 5).join(","));
+
+// ...and switching back must restore a quiver sort rather than sending a class key.
+await page.click("#btn-distinct");
+await page.waitForFunction(() => document.getElementById("table-body").dataset.scope === "distinct",
+  null, { timeout: 15000 });
+check("browse: switching back to quivers restores a valid sort",
+  await page.locator("#thead-quivers").isVisible() && !(await page.locator("#thead-classes").isVisible()));
 
 // ---- Home uses /stats and /random ----
 await page.goto(`${BASE}/`, { waitUntil: "networkidle" });

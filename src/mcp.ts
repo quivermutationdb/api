@@ -110,6 +110,7 @@ export function createQmdServer(env: Env) {
     description: "Filter, sort and page mutation classes (with nickname, exploration state, three-state properties).",
     inputSchema: {
       rank: z.number().int().optional(), dynkin_type: z.string().optional(), is_open: z.boolean().optional(),
+      has_nickname: z.boolean().optional().describe("true = only classes carrying a curated nickname"),
       is_mutation_finite: z.boolean().optional(), is_mutation_acyclic: z.boolean().optional(),
       orbit_min: z.number().int().optional(), orbit_max: z.number().int().optional(), nickname: z.string().optional(),
       sort: z.enum(["mc_id", "num_vertices", "class_size", "distinct_quiver_count", "dynkin_type", "class_type"]).optional(),
