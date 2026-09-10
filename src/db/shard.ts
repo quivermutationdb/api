@@ -42,6 +42,22 @@ export function createPool(env: Env): Pool {
   // not theorised. The request's own error path reports the failure; this
   // listener only has to keep the process alive.
   pool.on("error", (e) => console.error("idle pool client error", e));
+  // pool.on("error") only covers clients sitting IDLE. When the server-side
+  // statement_timeout cancels a query, the socket dies while the client is
+  // ACTIVE and its query promise has already rejected, so nothing is listening
+  // -- and the write-after-FIN that follows is raised synchronously inside a
+  // stream "data" handler, where no promise can catch it. Unhandled, Node
+  // treats it as fatal and the isolate dies with every in-flight request.
+  // Listening on the client and on its raw stream is the only place this can
+  // be caught. Observed repeatedly; do not remove either listener.
+  pool.on("connect", (client) => {
+    client.on("error", (e) => console.error("pg client error", e));
+    const stream = (client as unknown as { connection?: { stream?: { on?: Function } } })
+      .connection?.stream;
+    if (stream && typeof stream.on === "function") {
+      stream.on("error", (e: unknown) => console.error("pg socket error", e));
+    }
+  });
   return pool;
 }
 

@@ -88,6 +88,7 @@ export interface ClassListParams {
   rank?: number; dynkinType?: string; isOpen?: boolean; isMutationFinite?: boolean;
   isMutationAcyclic?: boolean; orbitMin?: number; orbitMax?: number; nickname?: string;
   hasNickname?: boolean;
+  hasName?: boolean;
   sort?: string; dir?: string; offset: number; limit: number; cursor?: string;
 }
 
@@ -102,6 +103,7 @@ export function classListParamsFrom(get: (k: string) => string | undefined): Cla
     orbitMax: parseInteger("orbit_max", get("orbit_max")),
     nickname: get("nickname") || undefined,
     hasNickname: parseBool("has_nickname", get("has_nickname")),
+    hasName: parseBool("has_name", get("has_name")),
     sort: get("sort"), dir: get("dir"), cursor: get("cursor"),
     ...parsePaging(get, 50),
   };
@@ -129,6 +131,13 @@ export async function listClasses(env: Env, p: ClassListParams) {
   // filter means the same thing in the classes view as in the quivers view.
   if (p.hasNickname !== undefined) {
     conds.push(p.hasNickname ? sql`${nick.slug} is not null` : sql`${nick.slug} is null`);
+  }
+  // See filterConditions in quivers.ts: has_name is nickname OR label OR
+  // dynkin_type, which is what a reader means by "named" -- 61 classes, not
+  // the 21 that carry a curated nickname.
+  if (p.hasName !== undefined) {
+    const named = sql`(${nick.slug} is not null or ${mc.label} is not null or ${mc.dynkinType} is not null)`;
+    conds.push(p.hasName ? named : sql`not ${named}`);
   }
 
   const sortKey = (p.sort ?? "num_vertices") as ClassSortKey;

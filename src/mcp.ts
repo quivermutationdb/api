@@ -41,7 +41,9 @@ const FILTERS = {
   is_mutation_finite: z.boolean().optional().describe("true = proved finite, false = proved infinite"),
   nickname: z.string().optional().describe("curated nickname slug, e.g. markov"),
   has_nickname: z.boolean().optional()
-    .describe("true = only quivers whose class has a curated nickname (the notable ones: Markov, the Dynkin and affine families, the exceptionals); false = only those without"),
+    .describe("true = only quivers whose class carries a CURATED nickname from data/nicknames.json (21 classes). Narrower than has_name -- E6/E7/E8 and the Dynkin families are NOT curated, they are named automatically"),
+  has_name: z.boolean().optional()
+    .describe("true = only quivers whose class has a name of any kind: curated nickname or the automatic Dynkin/surface label (61 classes, including every A_n, D_n, E6, E7, E8). Usually the one you want"),
 };
 const PAGING = {
   limit: z.number().int().min(1).max(1000).optional(),
@@ -110,7 +112,8 @@ export function createQmdServer(env: Env) {
     description: "Filter, sort and page mutation classes (with nickname, exploration state, three-state properties).",
     inputSchema: {
       rank: z.number().int().optional(), dynkin_type: z.string().optional(), is_open: z.boolean().optional(),
-      has_nickname: z.boolean().optional().describe("true = only classes carrying a curated nickname"),
+      has_nickname: z.boolean().optional().describe("true = only classes carrying a CURATED nickname (21)"),
+      has_name: z.boolean().optional().describe("true = only classes with any name, curated or automatic Dynkin/surface label (61)"),
       is_mutation_finite: z.boolean().optional(), is_mutation_acyclic: z.boolean().optional(),
       orbit_min: z.number().int().optional(), orbit_max: z.number().int().optional(), nickname: z.string().optional(),
       sort: z.enum(["mc_id", "num_vertices", "class_size", "distinct_quiver_count", "dynkin_type", "class_type"]).optional(),

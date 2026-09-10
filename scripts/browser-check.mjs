@@ -215,15 +215,22 @@ check("search: max-edge menu spans 0..bound from /stats",
 
 // ---- Named-classes filter ----
 await page.goto(`${BASE}/browse.html`, { waitUntil: "networkidle" });
-await page.selectOption("#filter-named", "true");
+await page.selectOption("#filter-named", "named");
 await page.click("button.btn:has-text('Filter')");
 await page.waitForFunction(() => {
   const rows = document.querySelectorAll("#table-body tr");
   return rows.length > 0 && !document.querySelector("#table-body .state-msg");
 }, null, { timeout: 15000 });
-const nickCells = await page.$$eval("#table-body tr", (rs) => rs.map((r) => !!r.querySelector(".nick")));
-check("browse: named-classes filter returns only quivers with a nickname",
-  nickCells.length > 0 && nickCells.every(Boolean), `${nickCells.filter(Boolean).length}/${nickCells.length}`);
+// "Has a name" is the broad sense: a Dynkin/surface label OR a curated
+// nickname. Asserting on the .nick badge alone would re-encode the too-narrow
+// definition that hid E6/E7/E8 -- so check the API's own view of the rows.
+const namedRows = await page.$$eval("#table-body tr td:first-child a", (as) => as.map((a) => a.textContent.trim()));
+const namedApi = await (await fetch(`${BASE}/api/quivers?has_name=true&limit=50`)).json();
+check("browse: 'Has a name' returns the same rows the API calls named",
+  namedRows.length > 0 && namedRows[0] === namedApi.items[0].qmd_id, `${namedRows[0]} vs ${namedApi.items[0]?.qmd_id}`);
+const namedIds = new Set(namedApi.items.map((i) => i.qmd_id));
+check("browse: every 'Has a name' row belongs to a class with a name",
+  namedRows.every((id) => namedIds.has(id)));
 
 // ---- Mutation classes view ----
 await page.goto(`${BASE}/browse.html`, { waitUntil: "networkidle" });

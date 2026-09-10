@@ -42,8 +42,11 @@ Maintainer: Blake Jackson <jackson@icarm.io>
   first page of members; `GET /api/classes/{id}/quivers` (distinct members,
   canonical first) · `GET /api/classes/{id}/labelings` (every labeled matrix).
 - `GET /api/classes/by-slug/markov` · `GET /api/nicknames` — curated names.
-  `GET /api/quivers?has_nickname=true` is every quiver in a named class — the
-  fastest route to the mathematically notable rows (346 across 21 classes).
+  `GET /api/quivers?has_name=true` is every quiver in a NAMED class (61
+  classes): the automatic Dynkin/surface `label` plus the curated nicknames.
+  `has_nickname=true` is the narrower curated set only (21). E6, E7, E8 and
+  every A_n/D_n are named automatically and have no nickname, so prefer
+  `has_name` unless you specifically want the hand-curated entries.
 - `GET /api/random/quiver` · `GET /api/random/class`
 - Bulk pull: `GET /api/export.ndjson?rank=4&limit=5000` then follow the
   `X-Next-Cursor` header until it is empty. Omit `limit` to stream the whole

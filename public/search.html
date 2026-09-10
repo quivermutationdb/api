@@ -90,10 +90,14 @@
       </div>
       <div class="field">
         <label for="f-named">Named classes</label>
+        <!-- See browse.html: "named" means any name -- the automatic
+             Dynkin/surface label or a curated nickname. Nickname-only is the
+             narrow curated set (21 classes vs 61). -->
         <select id="f-named">
           <option value="">Any</option>
-          <option value="true">Has a nickname</option>
-          <option value="false">No nickname</option>
+          <option value="named">Has a name</option>
+          <option value="nickname">Curated nickname only</option>
+          <option value="unnamed">Unnamed</option>
         </select>
       </div>
       <div class="field">
@@ -236,7 +240,9 @@ function getFilters() {
   if (reptype) f.representation_type = reptype;
   if (maxedge) f.max_edge = maxedge;
   if (open)    f.is_open = open;
-  if (named)   f.has_nickname = named;
+  if (named === 'named')    f.has_name = 'true';
+  if (named === 'unnamed')  f.has_name = 'false';
+  if (named === 'nickname') f.has_nickname = 'true';
   if (omin)    f.orbit_min = omin;
   if (omax)    f.orbit_max = omax;
   if (acyclic) f.is_acyclic = 'true';
@@ -251,7 +257,8 @@ function renderActivePills(filters) {
     is_open: v => v === 'true' ? 'open' : 'finite type',
     orbit_min: v => `class size ≥ ${v}`, orbit_max: v => `class size ≤ ${v}`,
     is_acyclic: 'acyclic',
-    has_nickname: v => v === 'true' ? 'named class' : 'unnamed class',
+    has_name: v => v === 'true' ? 'named class' : 'unnamed class',
+    has_nickname: () => 'curated nickname',
     is_simply_laced: 'simply-laced', is_mutation_finite: 'mutation-finite',
   };
   return Object.entries(filters).map(([k, v]) => {
@@ -409,7 +416,7 @@ function resetSearch() {
 // takes) and run. Selects ignore values that aren't one of their options.
 const URL_FIELDS = {
   rank: 'f-rank', dynkin_type: 'f-dynkin', representation_type: 'f-reptype',
-  max_edge: 'f-maxedge', is_open: 'f-open', has_nickname: 'f-named',
+  max_edge: 'f-maxedge', is_open: 'f-open',
   orbit_min: 'f-orbit-min', orbit_max: 'f-orbit-max',
 };
 const URL_CHECKS = {
@@ -420,6 +427,12 @@ const URL_CHECKS = {
   await menusReady;          // the <option>s must exist before we select one
   const urlParams = new URLSearchParams(location.search);
   let any = false;
+  // The name control maps onto two different API params, so it cannot go in
+  // URL_FIELDS (one param -> one field).
+  const named = urlParams.get('has_name') === 'true' ? 'named'
+              : urlParams.get('has_name') === 'false' ? 'unnamed'
+              : urlParams.get('has_nickname') === 'true' ? 'nickname' : '';
+  if (named) { document.getElementById('f-named').value = named; any = true; }
   for (const [key, id] of Object.entries(URL_FIELDS)) {
     const v = urlParams.get(key);
     if (v) { document.getElementById(id).value = v; any = true; }

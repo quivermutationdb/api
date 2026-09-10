@@ -115,6 +115,23 @@ const st = await json("/stats");
       named.items.length > 0 && named.items.every((i) => i.nickname));
     check("has_nickname echoed in the applied filter",
       (await json("/quivers?rank=3&has_nickname=true&limit=1")).items.length === 1);
+
+    // has_name is the BROAD sense and must be a strict superset: a class is
+    // named if it has a Dynkin/surface label or a curated nickname. Getting
+    // this backwards is what hid E6, E7 and E8 from the browse page -- they
+    // carry a label and no nickname, like every A_n and D_n.
+    const anyName = await json("/quivers?rank=3&has_name=true&limit=200&total=exact");
+    const noName = await json("/quivers?rank=3&has_name=false&limit=1&total=exact");
+    check("has_name partitions the cut",
+      anyName.total + noName.total === all.total, `${anyName.total}+${noName.total} vs ${all.total}`);
+    check("has_name is a superset of has_nickname", anyName.total >= named.total,
+      `${anyName.total} vs ${named.total}`);
+    const classesNamed = await json("/classes?rank=3&has_name=true&limit=100");
+    check("has_name on /classes agrees and includes label-only classes",
+      classesNamed.items.length > 0
+        && classesNamed.items.every((c) => c.nickname || c.label || c.dynkin_type)
+        && classesNamed.items.some((c) => !c.nickname && (c.label || c.dynkin_type)),
+      `${classesNamed.items.length} classes`);
   }
 
   const a3 = await json("/search?dynkin_type=A3&limit=5");

@@ -19,7 +19,8 @@ const FILTER_PARAMS = [
   p("is_simply_laced", "boolean", "All |b_ij| <= 1."),
   p("is_mutation_finite", "boolean", "true: proved mutation-finite; false: proved mutation-infinite. Undetermined classes match neither."),
   p("nickname", "string", "Curated class nickname slug, e.g. markov."),
-  p("has_nickname", "boolean", "Only quivers whose class carries a curated nickname (true) or does not (false). The named classes are the mathematically notable ones."),
+  p("has_nickname", "boolean", "Only quivers whose class carries a CURATED nickname from data/nicknames.json (21 classes). Narrower than has_name."),
+  p("has_name", "boolean", "Only quivers whose class has a name of any kind — curated nickname, or the automatic label from Dynkin/surface classification (61 classes: every A_n, D_n, E6, E7, E8, the affine and surface families, and the exceptionals). This is usually the one you want."),
   p("explored", "boolean", "Only quivers with (true) / without (false) an explored mutation class."),
 ];
 const PAGE_PARAMS = [
@@ -80,7 +81,7 @@ export const OPENAPI = {
       parameters: [pathParam("id", "Q.n{rank}.{hash}"), p("limit", "integer", "max 1000"), p("cursor", "string", "keyset cursor")],
       responses: { ...ok("Labelings", "LabelingList"), ...notFound } } },
     "/classes": { get: { summary: "List mutation classes (browse)", operationId: "listClasses",
-      parameters: [p("rank", "integer", ""), p("dynkin_type", "string", ""), p("is_open", "boolean", ""), p("is_mutation_finite", "boolean", ""), p("is_mutation_acyclic", "boolean", ""), p("orbit_min", "integer", ""), p("orbit_max", "integer", ""), p("nickname", "string", "slug"), p("has_nickname", "boolean", "Only classes with (true) / without (false) a curated nickname."),
+      parameters: [p("rank", "integer", ""), p("dynkin_type", "string", ""), p("is_open", "boolean", ""), p("is_mutation_finite", "boolean", ""), p("is_mutation_acyclic", "boolean", ""), p("orbit_min", "integer", ""), p("orbit_max", "integer", ""), p("nickname", "string", "slug"), p("has_nickname", "boolean", "Only classes with (true) / without (false) a CURATED nickname (21)."), p("has_name", "boolean", "Only classes with (true) / without (false) a name of any kind — curated nickname or automatic Dynkin/surface label (61)."),
         p("sort", "string", "mc_id | num_vertices | class_size | distinct_quiver_count | dynkin_type | class_type"), p("dir", "string", "asc | desc"), ...PAGE_PARAMS],
       responses: { ...ok("Page of classes", "ClassList"), ...badRequest } } },
     "/classes/{id}": { get: { summary: "One mutation class: invariants, provenance, first page of members", operationId: "getClass",

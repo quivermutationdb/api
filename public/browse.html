@@ -61,10 +61,17 @@
     </div>
     <div class="filter-group">
       <label for="filter-named">Named classes</label>
+      <!-- "Has a name" is the broad sense and the one people mean: a class is
+           named if it carries a Dynkin/surface label OR a curated nickname.
+           Most names are automatic -- E6, E7, E8 and every A_n/D_n have a
+           label and no nickname -- so a nickname-only filter finds 21 classes
+           where the honest answer is 61. The curated set is still selectable
+           for anyone who wants exactly data/nicknames.json. -->
       <select id="filter-named">
         <option value="">All</option>
-        <option value="true">Has a nickname</option>
-        <option value="false">No nickname</option>
+        <option value="named">Has a name</option>
+        <option value="nickname">Curated nickname only</option>
+        <option value="unnamed">Unnamed</option>
       </select>
     </div>
     <button class="btn" onclick="applyFilters()">Filter</button>
@@ -108,7 +115,7 @@
         <tr>
           <th data-col="mc_id">Class ID <a class="col-info" href="/wiki.html#mutation-class" title="Definition" aria-label="Mutation class id definition">ⓘ</a> <span class="sort-arrow">↕</span></th>
           <th data-col="num_vertices">Rank <a class="col-info" href="/wiki.html#rank" title="Definition" aria-label="Rank definition">ⓘ</a> <span class="sort-arrow">↕</span></th>
-          <th>Nickname <a class="col-info" href="/wiki.html#nicknames" title="Definition" aria-label="Nickname definition">ⓘ</a></th>
+          <th>Name <a class="col-info" href="/wiki.html#nicknames" title="Definition" aria-label="Class name definition">ⓘ</a></th>
           <th data-col="dynkin_type">Dynkin type <a class="col-info" href="/wiki.html#dynkin-type" title="Definition" aria-label="Dynkin type definition">ⓘ</a> <span class="sort-arrow">↕</span></th>
           <th data-col="class_type">Class <a class="col-info" href="/wiki.html#mutation-finite" title="Definition" aria-label="Class type definition">ⓘ</a> <span class="sort-arrow">↕</span></th>
           <th data-col="distinct_quiver_count">Distinct quivers <a class="col-info" href="/wiki.html#mutation-class" title="Definition" aria-label="Distinct quivers definition">ⓘ</a> <span class="sort-arrow">↕</span></th>
@@ -187,6 +194,17 @@ function classBadge(q) {
   if (q.exploration === 'truncated') return '<span class="badge badge-truncated" title="Partially explored; finiteness unknown">Truncated</span>';
   return `<span class="badge ${q.is_open ? 'badge-open' : 'badge-closed'}">${q.is_open ? 'Open' : 'Finite'}</span>`;
 }
+/**
+ * The name to show for a class: the curated nickname if one exists, otherwise
+ * the automatic Dynkin/surface label. Showing only the nickname left E6, E7,
+ * E8 and every A_n/D_n looking anonymous in a column headed "Nickname", which
+ * is how the too-narrow filter went unnoticed. Curated names keep the .nick
+ * badge so the two remain distinguishable.
+ */
+const className = c => c.nickname ? `<span class="nick">${esc(c.nickname)}</span>`
+  : (c.label ?? c.dynkin_type) ? `<span class="mono">${esc(c.label ?? c.dynkin_type)}</span>`
+  : DASH;
+
 const classSizeCell = q => q.class_size != null ? q.class_size
   : (q.mutation_finite === false || q.is_open) ? '<span style="color:var(--ink-light)" title="mutation-infinite">∞</span>'
   : '<span style="color:var(--ink-light)" title="labeled orbit not stored">—</span>';
@@ -255,7 +273,7 @@ function renderTable(data) {
       <tr>
         <td><a href="/class.html?id=${encodeURIComponent(c.mc_id)}">${c.mc_id}</a></td>
         <td class="mono">${c.num_vertices}</td>
-        <td>${c.nickname ? `<span class="nick">${esc(c.nickname)}</span>` : DASH}</td>
+        <td>${className(c)}</td>
         <td class="mono">${c.dynkin_type ?? '<span style="color:var(--rule)">—</span>'}</td>
         <td>${classBadge(c)}</td>
         <td class="mono">${Number(c.distinct_quiver_count).toLocaleString()}</td>
@@ -421,7 +439,9 @@ function applyFilters() {
   if (rank)      filters.rank = rank;
   if (open)      filters.is_open = open;
   if (dynkin)    filters.dynkin_type = dynkin;
-  if (named)     filters.has_nickname = named;
+  if (named === 'named')    filters.has_name = 'true';
+  if (named === 'unnamed')  filters.has_name = 'false';
+  if (named === 'nickname') filters.has_nickname = 'true';
   applySortAvailability();     // the rank just changed which sorts are servable
   currentPage = 1;
   goPage(1);

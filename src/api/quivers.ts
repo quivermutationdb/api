@@ -49,6 +49,7 @@ export interface ListFilters {
   isMutationFinite?: boolean;
   nickname?: string;
   hasNickname?: boolean;
+  hasName?: boolean;
   explored?: boolean;
 }
 
@@ -68,6 +69,7 @@ export function parseFilters(get: (k: string) => string | undefined): ListFilter
     isMutationFinite: parseBool("is_mutation_finite", get("is_mutation_finite")),
     nickname: get("nickname") || undefined,
     hasNickname: parseBool("has_nickname", get("has_nickname")),
+    hasName: parseBool("has_name", get("has_name")),
     explored: parseBool("explored", get("explored")),
   };
 }
@@ -81,7 +83,8 @@ export function filtersAsRecord(f: ListFilters): Record<string, unknown> {
     is_open: f.isOpen, orbit_min: f.orbitMin, orbit_max: f.orbitMax,
     is_acyclic: f.isAcyclic, is_connected: f.isConnected,
     is_simply_laced: f.isSimplyLaced, is_mutation_finite: f.isMutationFinite,
-    nickname: f.nickname, has_nickname: f.hasNickname, explored: f.explored,
+    nickname: f.nickname, has_nickname: f.hasNickname, has_name: f.hasName,
+    explored: f.explored,
   })) {
     if (v !== undefined) out[k] = v;
   }
@@ -126,6 +129,37 @@ export function filterConditions(f: ListFilters): SQL[] {
   // unfiltered by rank -- no rank guard needed.
   if (f.hasNickname !== undefined) {
     conds.push(f.hasNickname ? sql`${nick.slug} is not null` : sql`${nick.slug} is null`);
+  }
+  // "Does this class have a NAME?" -- a broader and much more useful question
+  // than has_nickname, which only sees data/nicknames.json. Most named classes
+  // are named automatically: `label` comes from dynkin.classify with a
+  // surfaces.classify fallback, and a curated nickname is reserved for what
+  // neither can name (CLAUDE.md). So E6, E7, E8 and every A_n/D_n carry a
+  // label and no nickname -- has_nickname finds 21 classes, has_name finds 61.
+  // dynkin_type is included for safety though it is currently a subset of
+  // label (verified: 0 rows with a dynkin_type and no label).
+  if (f.hasName !== undefined) {
+    // Written as `= ANY(array(...))` rather than as a predicate on the joined
+    // mc/nick columns, and the difference is 400x. The natural form,
+    // `nick.slug IS NOT NULL OR mc.label IS NOT NULL`, is an OR spanning two
+    // joined tables, so the planner cannot drive from the small side: it
+    // seq-scans all 50.8M quivers and hash-joins them. Measured, exact count:
+    //   OR across the join      60,291 ms
+    //   IN (subquery)           41,837 ms
+    //   JOIN from the small side 69,289 ms
+    //   = ANY(array(subquery))      147 ms   <-- this
+    // The array is materialised first (61 class ids today), after which each
+    // is an index lookup on idx_q_mc_labcount. Aliased mc2/nk2 because the
+    // outer query already has both tables joined under their own names.
+    const namedClassIds = sql`array(
+      select mc2.id from mutation_classes mc2
+      left join class_nicknames nk2 on nk2.mc_id = mc2.id
+      where nk2.slug is not null or mc2.label is not null or mc2.dynkin_type is not null)`;
+    conds.push(f.hasName
+      ? sql`${q.mutationClassId} = any(${namedClassIds})`
+      // An unexplored quiver has no class and so has no name; `= ANY` on a
+      // NULL yields NULL, which would drop those rows from the false side.
+      : sql`(${q.mutationClassId} is null or not (${q.mutationClassId} = any(${namedClassIds})))`);
   }
   return conds;
 }
@@ -371,6 +405,22 @@ export async function listQuivers(env: Env, p: ListParams) {
   // Validate before starting any query, so no promise is left dangling on throw.
   if (p.scope === "labelings" && (sortKey !== "num_vertices" || dir !== "asc")) {
     throw new BadRequest("scope=labelings supports only the default sort (num_vertices asc)");
+  }
+  // An exact count of a huge, non-rank-only cut is the other query shape that
+  // cannot finish: rank 6 + is_acyclic measured 13.9 s, and has_name=false is
+  // "count almost the whole table". Both exceed the 10 s statement_timeout, so
+  // both used to be cancelled server-side -- see createPool for why a cancelled
+  // statement is dangerous rather than merely slow. Refuse up front, exactly as
+  // for the sorts. The rank_stats fast path is unaffected: a rank-only cut is
+  // answered from stored aggregates and never counts anything.
+  if (p.total === "exact" && !onlyRankFilter(p.filters)) {
+    const rows = await cutSize(env, p.filters.rank);
+    if (rows > UNSORTABLE_ABOVE_ROWS) {
+      throw new BadRequest(
+        `total=exact is not available on a cut this large (${rows.toLocaleString()} rows): `
+        + "counting it requires scanning the whole cut. Drop total=exact to get the "
+        + "capped count (total_is_lower_bound: true), or add a rank filter to narrow it.");
+    }
   }
   if (SORTS_WITHOUT_AN_INDEX.has(sortKey)) {
     const rows = await cutSize(env, p.filters.rank);
