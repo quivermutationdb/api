@@ -5,6 +5,14 @@ yet.** The two blockers are cleared — ranks 7 and 8 are generated and verified
 and the pre-flight code review is done and its safe-on-D1 fixes are landed. The
 live system is still one Worker over D1 exactly as CLAUDE.md describes.
 
+**CUTOVER COMPLETE 2026-09-09.** quivermutationdb.org serves PlanetScale
+Postgres. Worker version `c844dc35-c2e2-450e-80c3-7674cf1a7ae7`; the live
+`/api/stats` reports 50,828,164 quivers across all eight ranks, against
+5,935,362 across five on D1 an hour earlier. Ranks 6, 7 and 8 are public for
+the first time. The five D1 databases still exist, unreferenced, as the
+rollback -- deleting them is a human-approved action and has NOT been done.
+Remaining: Phase 5 (the R2 bulk corpus).
+
 **Superseded 2026-09-09: PROVISIONED AND LOADED.** The PS-160 exists, the
 Hyperdrive config exists (`3102c79867ae4311b621240f7f200bbe`, wired into
 `wrangler.jsonc`), and all 50,828,164 rows are loaded, indexed and verified.
