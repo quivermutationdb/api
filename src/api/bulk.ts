@@ -73,10 +73,14 @@ bulkRoutes.get("/bulk/:file", async (c) => {
   const h = new Headers();
   obj.writeHttpMetadata(h);
   h.set("etag", obj.httpEtag);
-  // Immutable: a corpus file is replaced by a new release, never edited. A
-  // year is safe because the filename is the identity and the manifest carries
-  // the checksum that says whether a cached copy is still current.
-  h.set("Cache-Control", "public, max-age=31536000, immutable");
+  // A day, and deliberately NOT `immutable`. Corpus filenames are STABLE across
+  // releases -- qmd-n4.ndjson.gz is regenerated with new contents when the
+  // census grows -- so `immutable` would tell every cache to serve the old
+  // bytes for a year without ever revalidating, and a reader would silently get
+  // last release's data with this release's checksums. The ETag makes
+  // revalidation cheap; a day of staleness after a release is the cost, and
+  // releases are rare. Only version-in-the-name files may be immutable.
+  h.set("Cache-Control", "public, max-age=86400");
   h.set("Accept-Ranges", "bytes");
   h.set("Content-Disposition", `attachment; filename="${file}"`);
   if (file.endsWith(".gz")) {
