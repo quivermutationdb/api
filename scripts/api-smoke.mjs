@@ -26,7 +26,7 @@ const EXPORT_COLUMNS_EXPECTED = [
   "is_finite_confirmed", "is_infinite_confirmed", "is_infinite_expected",
   "size_of_explored_frontier", "is_mutation_acyclic",
   "is_banff", "is_louise", "is_p_prime",
-  "exploration", "nickname", "mutation_finite", "explored",
+  "exploration", "nickname", "mutation_finite", "explored", "label",
 ];
 
 let failures = 0;
@@ -260,7 +260,14 @@ const st = await json("/stats");
   const bytes = new Uint8Array(await res.arrayBuffer());
   check("export BOM + headers", bytes[0] === 0xef && res.headers.get("content-type")?.includes("text/csv") === true);
   const lines = new TextDecoder().decode(bytes).split("\r\n").filter((l) => l.length > 0);
-  check("export header row", lines[0].endsWith("is_banff,is_louise,is_p_prime,exploration,nickname,mutation_finite,explored"));
+  // The tail of the header, which is where appended columns land. Column ORDER
+  // is a compatibility promise -- CSV consumers index by position -- so this
+  // failing on an append is correct and the fix is to update the expectation,
+  // never to reorder.
+  check("export header row", lines[0].endsWith(
+    "is_banff,is_louise,is_p_prime,exploration,nickname,mutation_finite,explored,label"), lines[0].slice(-70));
+  check("export header is exactly EXPORT_COLUMNS in order",
+    lines[0].replace(/^\ufeff/, "") === EXPORT_COLUMNS_EXPECTED.join(","));
   check("export rank 2 rows (2 connected quivers)", lines.length === 3, String(lines.length));
   check("export matrix quoted JSON + TRUE/FALSE", lines[1].includes('"[[0,') && /,(TRUE|FALSE),/.test(lines[1]));
   const lab = (await (await get("/export?rank=2&scope=labelings")).text()).split("\r\n").filter((l) => l.length > 0);

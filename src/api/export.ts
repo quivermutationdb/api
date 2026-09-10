@@ -36,6 +36,13 @@ export const EXPORT_COLUMNS = [
   "exploration", "nickname",
   // --- phase 3 (appended) ---
   "mutation_finite", "explored",
+  // --- appended 2026-09-10 ---
+  // The class's automatic name from dynkin.classify, falling back to
+  // surfaces.classify. Omitting it meant 33 of the 49 named classes -- every
+  // surface class, 5,254 quivers -- exported as dynkin_type: null,
+  // nickname: null and so looked unnamed, hiding the classification the
+  // pipeline exists to compute. dynkin_type is a strict subset of it.
+  "label",
 ] as const;
 
 function cell(v: unknown): string {
@@ -56,7 +63,8 @@ const EXPORT_SELECTION = {
   isAcyclic: q.isAcyclic, isConnected: q.isConnected,
   isBipartite: q.isBipartite, isAbundant: q.isAbundant, isPlanar: q.isPlanar,
   symmetryGroup: q.symmetryGroup, mcId: q.mutationClassId, mutationFinite: q.mutationFinite,
-  mcDynkinType: mc.dynkinType, mcIsOpen: mc.isOpen, mcExploration: mc.exploration,
+  mcDynkinType: mc.dynkinType, mcLabel: mc.label,
+  mcIsOpen: mc.isOpen, mcExploration: mc.exploration,
   mcClassSize: mc.classSize,
   mcDistinct: mc.distinctQuiverCount, mcMerged: mc.mergedOrbitCount,
   mcFinite: mc.isFiniteConfirmed, mcInfinite: mc.isInfiniteConfirmed,
@@ -123,6 +131,7 @@ export function exportRow(r: ExportRow, matrix?: string): Record<string, unknown
     nickname: r.nickname,
     mutation_finite: r.mutationFinite,
     explored: r.mcId !== null,
+    label: r.mcLabel,
   };
 }
 

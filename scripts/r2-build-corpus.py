@@ -48,7 +48,7 @@ COLUMNS = [
     "is_finite_confirmed", "is_infinite_confirmed", "is_infinite_expected",
     "size_of_explored_frontier", "is_mutation_acyclic",
     "is_banff", "is_louise", "is_p_prime",
-    "exploration", "nickname", "mutation_finite", "explored",
+    "exploration", "nickname", "mutation_finite", "explored", "label",
 ]
 
 # (n, seq) is id order per rank, which is the order /api/export.ndjson walks.
@@ -62,7 +62,7 @@ COPY (
          mc.is_finite_confirmed, mc.is_infinite_confirmed, mc.is_infinite_expected,
          mc.size_of_explored_frontier, mc.is_mutation_acyclic,
          mc.is_banff, mc.is_louise, mc.is_p_prime, mc.exploration,
-         nk.nickname, q.mutation_finite
+         nk.nickname, q.mutation_finite, mc.label
   FROM quivers q
   LEFT JOIN mutation_classes mc ON q.mutation_class_id = mc.id
   LEFT JOIN class_nicknames nk ON nk.mc_id = mc.id
@@ -140,6 +140,10 @@ def row_to_obj(f: list) -> dict:
         "nickname": f[27],
         "mutation_finite": tri(f[28]),
         "explored": f[12] is not None,
+        # The automatic Dynkin/surface name. dynkin_type above is a strict
+        # subset: 33 of the 49 named classes -- every surface class -- have a
+        # label and no dynkin_type, and without this they read as unnamed.
+        "label": f[29],
     }
 
 

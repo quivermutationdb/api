@@ -114,6 +114,7 @@ export const OPENAPI = {
       responses: { 200: { description: "File" }, 206: { description: "Partial content (Range)" }, ...notFound } } },
     "/export": { get: { summary: "CSV export of a filtered cut (streamed)", operationId: "exportCsv",
       parameters: [...FILTER_PARAMS, p("scope", "string", "distinct | labelings"), p("email", "string", "optional, self-reported for usage tracking"), p("name", "string", "optional")],
+      description: "Columns are EXPORT_COLUMNS, appended-to but never reordered. Two name fields differ: `dynkin_type` is the finite cluster type (A3, D4, ...) and `label` is the class's full automatic name, which also covers the surface classes (annulus(1,7), pair of pants(1,1,3)) -- 33 of the 49 named classes have a label and no dynkin_type. `nickname` is the curated name, rarer still.",
       responses: { 200: { description: "text/csv; UTF-8 BOM; CRLF; TRUE/FALSE booleans; empty cell = null" }, ...badRequest } } },
   },
   components: {
