@@ -19,6 +19,7 @@ const FILTER_PARAMS = [
   p("is_simply_laced", "boolean", "All |b_ij| <= 1."),
   p("is_mutation_finite", "boolean", "true: proved mutation-finite; false: proved mutation-infinite. Undetermined classes match neither."),
   p("nickname", "string", "Curated class nickname slug, e.g. markov."),
+  p("has_nickname", "boolean", "Only quivers whose class carries a curated nickname (true) or does not (false). The named classes are the mathematically notable ones."),
   p("explored", "boolean", "Only quivers with (true) / without (false) an explored mutation class."),
 ];
 const PAGE_PARAMS = [

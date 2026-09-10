@@ -48,6 +48,7 @@ export interface ListFilters {
   isSimplyLaced?: boolean;
   isMutationFinite?: boolean;
   nickname?: string;
+  hasNickname?: boolean;
   explored?: boolean;
 }
 
@@ -66,6 +67,7 @@ export function parseFilters(get: (k: string) => string | undefined): ListFilter
     isSimplyLaced: parseBool("is_simply_laced", get("is_simply_laced")),
     isMutationFinite: parseBool("is_mutation_finite", get("is_mutation_finite")),
     nickname: get("nickname") || undefined,
+    hasNickname: parseBool("has_nickname", get("has_nickname")),
     explored: parseBool("explored", get("explored")),
   };
 }
@@ -79,7 +81,7 @@ export function filtersAsRecord(f: ListFilters): Record<string, unknown> {
     is_open: f.isOpen, orbit_min: f.orbitMin, orbit_max: f.orbitMax,
     is_acyclic: f.isAcyclic, is_connected: f.isConnected,
     is_simply_laced: f.isSimplyLaced, is_mutation_finite: f.isMutationFinite,
-    nickname: f.nickname, explored: f.explored,
+    nickname: f.nickname, has_nickname: f.hasNickname, explored: f.explored,
   })) {
     if (v !== undefined) out[k] = v;
   }
@@ -116,6 +118,15 @@ export function filterConditions(f: ListFilters): SQL[] {
   if (f.orbitMin !== undefined) conds.push(sql`${mc.classSize} >= ${f.orbitMin}`);
   if (f.orbitMax !== undefined) conds.push(sql`${mc.classSize} <= ${f.orbitMax}`);
   if (f.nickname !== undefined) conds.push(eq(nick.slug, f.nickname.toLowerCase()));
+  // "Is this quiver in a class someone has named?" -- the curated classes are
+  // the mathematically notable ones (Markov, the Dynkin and affine families,
+  // the exceptionals), so this is the shortest path from the browse page to
+  // the rows that matter. 346 quivers across 21 classes today. It is driven
+  // from class_nicknames, which is 21 rows, so it costs ~174 ms even
+  // unfiltered by rank -- no rank guard needed.
+  if (f.hasNickname !== undefined) {
+    conds.push(f.hasNickname ? sql`${nick.slug} is not null` : sql`${nick.slug} is null`);
+  }
   return conds;
 }
 

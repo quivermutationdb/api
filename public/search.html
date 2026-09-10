@@ -60,12 +60,10 @@
     <div class="filter-grid">
       <div class="field">
         <label for="f-rank">Rank (vertices)</label>
+        <!-- Generated from /api/stats; see fillFromStats. Hard-coded options
+             here went stale through two census releases. -->
         <select id="f-rank">
           <option value="">Any</option>
-          <option value="1">1</option>
-          <option value="2">2</option>
-          <option value="3">3</option>
-          <option value="4">4</option>
         </select>
       </div>
       <div class="field">
@@ -83,10 +81,19 @@
       </div>
       <div class="field">
         <label for="f-maxedge">Max edge weight</label>
+        <!-- Also generated: this offered only 1 and 2, which silently hid the
+             5.9M quivers of weight 3 or more that ranks 1-4 were generated
+             with (bound 10). The ceiling comes from rank_stats.bound. -->
         <select id="f-maxedge">
           <option value="">Any</option>
-          <option value="1">1</option>
-          <option value="2">2</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="f-named">Named classes</label>
+        <select id="f-named">
+          <option value="">Any</option>
+          <option value="true">Has a nickname</option>
+          <option value="false">No nickname</option>
         </select>
       </div>
       <div class="field">
@@ -178,6 +185,38 @@ document.getElementById('id-input').addEventListener('keydown', e => {
   if (e.key === 'Enter') lookupId();
 });
 
+/**
+ * Fill the rank and max-edge menus from the data rather than from literals.
+ * Both were hard-coded and both went stale: rank stopped at 4 through two
+ * census releases, and max edge offered only 1-2 while the generation bound
+ * was 10, hiding every heavier quiver from search.
+ *
+ * The max-edge ceiling is rank_stats.bound -- the weight bound each cell was
+ * generated at -- so it tracks the census automatically. A failure here leaves
+ * the menus with just "Any", which filters nothing and breaks nothing.
+ */
+async function fillFromStats() {
+  try {
+    const st = await (await fetch(`${API}/stats`)).json();
+    const rankSel = document.getElementById('f-rank');
+    if (rankSel && st.by_rank?.length) {
+      rankSel.innerHTML = '<option value="">Any</option>'
+        + st.by_rank.map(r => `<option value="${r.n}">${r.n} — ${Number(r.distinct_quivers).toLocaleString()}</option>`).join('');
+    }
+    const edgeSel = document.getElementById('f-maxedge');
+    const ceiling = Math.max(0, ...st.by_rank.map(r => r.bound ?? 0));
+    if (edgeSel && ceiling > 0) {
+      edgeSel.innerHTML = '<option value="">Any</option>'
+        + Array.from({ length: ceiling + 1 }, (_, i) => `<option value="${i}">${i}</option>`).join('');
+    }
+  } catch (e) { console.error('/stats unavailable; filter menus left as-is', e); }
+}
+// Started here, AWAITED by initFromUrl at the bottom of this file. The menus
+// are generated, so a deep link like ?rank=3 cannot select an option that does
+// not exist yet: setting .value before the options are in place silently does
+// nothing, and repopulating afterwards would discard it anyway.
+const menusReady = fillFromStats();
+
 function getFilters() {
   const f = {};
   const rank    = document.getElementById('f-rank').value;
@@ -185,6 +224,7 @@ function getFilters() {
   const reptype = document.getElementById('f-reptype').value;
   const maxedge = document.getElementById('f-maxedge').value;
   const open    = document.getElementById('f-open').value;
+  const named   = document.getElementById('f-named').value;
   const omin    = document.getElementById('f-orbit-min').value;
   const omax    = document.getElementById('f-orbit-max').value;
   const acyclic = document.getElementById('f-acyclic').checked;
@@ -196,6 +236,7 @@ function getFilters() {
   if (reptype) f.representation_type = reptype;
   if (maxedge) f.max_edge = maxedge;
   if (open)    f.is_open = open;
+  if (named)   f.has_nickname = named;
   if (omin)    f.orbit_min = omin;
   if (omax)    f.orbit_max = omax;
   if (acyclic) f.is_acyclic = 'true';
@@ -210,6 +251,7 @@ function renderActivePills(filters) {
     is_open: v => v === 'true' ? 'open' : 'finite type',
     orbit_min: v => `class size ≥ ${v}`, orbit_max: v => `class size ≤ ${v}`,
     is_acyclic: 'acyclic',
+    has_nickname: v => v === 'true' ? 'named class' : 'unnamed class',
     is_simply_laced: 'simply-laced', is_mutation_finite: 'mutation-finite',
   };
   return Object.entries(filters).map(([k, v]) => {
@@ -367,13 +409,15 @@ function resetSearch() {
 // takes) and run. Selects ignore values that aren't one of their options.
 const URL_FIELDS = {
   rank: 'f-rank', dynkin_type: 'f-dynkin', representation_type: 'f-reptype',
-  max_edge: 'f-maxedge', is_open: 'f-open', orbit_min: 'f-orbit-min', orbit_max: 'f-orbit-max',
+  max_edge: 'f-maxedge', is_open: 'f-open', has_nickname: 'f-named',
+  orbit_min: 'f-orbit-min', orbit_max: 'f-orbit-max',
 };
 const URL_CHECKS = {
   is_acyclic: 'f-acyclic',
   is_simply_laced: 'f-simply-laced', is_mutation_finite: 'f-mutation-finite',
 };
-(function initFromUrl() {
+(async function initFromUrl() {
+  await menusReady;          // the <option>s must exist before we select one
   const urlParams = new URLSearchParams(location.search);
   let any = false;
   for (const [key, id] of Object.entries(URL_FIELDS)) {

@@ -103,6 +103,20 @@ const st = await json("/stats");
     check(`sort=${srt} still served on a small cut`, Array.isArray(r.items) && r.items.length === 5);
   }
 
+  // has_nickname: the two sides must partition the cut exactly, and every row
+  // on the true side must actually carry a nickname.
+  {
+    const named = await json("/quivers?rank=3&has_nickname=true&limit=100&total=exact");
+    const unnamed = await json("/quivers?rank=3&has_nickname=false&limit=1&total=exact");
+    const all = await json("/quivers?rank=3&limit=1&total=exact");
+    check("has_nickname partitions the cut",
+      named.total + unnamed.total === all.total, `${named.total}+${unnamed.total} vs ${all.total}`);
+    check("has_nickname=true returns only nicknamed quivers",
+      named.items.length > 0 && named.items.every((i) => i.nickname));
+    check("has_nickname echoed in the applied filter",
+      (await json("/quivers?rank=3&has_nickname=true&limit=1")).items.length === 1);
+  }
+
   const a3 = await json("/search?dynkin_type=A3&limit=5");
   check("A3 class size 14, D4 50", a3.items[0].class_size === 14 && (await json("/search?dynkin_type=D4&limit=1")).items[0].class_size === 50);
   check("bad int -> 400", "detail" in await json("/quivers?rank=abc", 400));

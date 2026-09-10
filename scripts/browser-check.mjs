@@ -185,6 +185,45 @@ await page.waitForFunction(() => document.querySelectorAll("#table-body tr").len
   && document.querySelectorAll("th.sort-disabled").length > 0, null, { timeout: 15000 });
 check("browse: labelings scope lists stored labelings (finite classes only), sort disabled", true);
 
+// ---- Filter menus are generated from /stats, not hard-coded ----
+// The regression these guard: rank stopped at 4 and max edge at 2 for two
+// census releases, so whole ranks and every quiver of weight >= 3 were
+// unreachable from the UI while sitting in the database. Assert against
+// /stats rather than against a literal, or the test goes stale the same way.
+const menuStats = stats;   // same payload; named apart from the home-page checks above
+const ranks = menuStats.by_rank.map((r) => String(r.n));
+const edgeCeiling = Math.max(0, ...menuStats.by_rank.map((r) => r.bound ?? 0));
+
+await page.goto(`${BASE}/browse.html`, { waitUntil: "networkidle" });
+await page.waitForFunction((n) => document.querySelectorAll("#filter-rank option").length === n + 1,
+  ranks.length, { timeout: 15000 });
+const browseRanks = await page.$$eval("#filter-rank option", (os) => os.map((o) => o.value).filter(Boolean));
+check("browse: rank menu lists exactly the ranks /stats reports",
+  JSON.stringify(browseRanks) === JSON.stringify(ranks), `${browseRanks} vs ${ranks}`);
+
+await page.goto(`${BASE}/search.html`, { waitUntil: "networkidle" });
+await page.waitForFunction((n) => document.querySelectorAll("#f-rank option").length === n + 1,
+  ranks.length, { timeout: 15000 });
+const searchRanks = await page.$$eval("#f-rank option", (os) => os.map((o) => o.value).filter(Boolean));
+check("search: rank menu lists exactly the ranks /stats reports",
+  JSON.stringify(searchRanks) === JSON.stringify(ranks), `${searchRanks} vs ${ranks}`);
+const edges = await page.$$eval("#f-maxedge option", (os) => os.map((o) => o.value).filter((v) => v !== ""));
+check("search: max-edge menu spans 0..bound from /stats",
+  edges.length === edgeCeiling + 1 && edges[0] === "0" && edges[edges.length - 1] === String(edgeCeiling),
+  `${edges.length} options, ceiling ${edgeCeiling}`);
+
+// ---- Named-classes filter ----
+await page.goto(`${BASE}/browse.html`, { waitUntil: "networkidle" });
+await page.selectOption("#filter-named", "true");
+await page.click("button.btn:has-text('Filter')");
+await page.waitForFunction(() => {
+  const rows = document.querySelectorAll("#table-body tr");
+  return rows.length > 0 && !document.querySelector("#table-body .state-msg");
+}, null, { timeout: 15000 });
+const nickCells = await page.$$eval("#table-body tr", (rs) => rs.map((r) => !!r.querySelector(".nick")));
+check("browse: named-classes filter returns only quivers with a nickname",
+  nickCells.length > 0 && nickCells.every(Boolean), `${nickCells.filter(Boolean).length}/${nickCells.length}`);
+
 // ---- Home uses /stats and /random ----
 await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
 check("home: ranks covered derived from /stats",

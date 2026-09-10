@@ -40,6 +40,8 @@ const FILTERS = {
   is_simply_laced: z.boolean().optional(),
   is_mutation_finite: z.boolean().optional().describe("true = proved finite, false = proved infinite"),
   nickname: z.string().optional().describe("curated nickname slug, e.g. markov"),
+  has_nickname: z.boolean().optional()
+    .describe("true = only quivers whose class has a curated nickname (the notable ones: Markov, the Dynkin and affine families, the exceptionals); false = only those without"),
 };
 const PAGING = {
   limit: z.number().int().min(1).max(1000).optional(),

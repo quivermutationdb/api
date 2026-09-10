@@ -39,12 +39,12 @@
   <div class="filters">
     <div class="filter-group">
       <label for="filter-rank">Rank (vertices)</label>
+      <!-- Options are generated from /api/stats (see fillRankOptions). They were
+           hard-coded 1-4 and stayed that way through two census releases, so
+           ranks 5-8 were unreachable from this menu long after they were in
+           the database. Do not put literal <option>s back. -->
       <select id="filter-rank">
         <option value="">All ranks</option>
-        <option value="1">1</option>
-        <option value="2">2</option>
-        <option value="3">3</option>
-        <option value="4">4</option>
       </select>
     </div>
     <div class="filter-group">
@@ -58,6 +58,14 @@
     <div class="filter-group">
       <label for="filter-dynkin">Dynkin type</label>
       <input type="text" id="filter-dynkin" placeholder="e.g. A3, D4, E6">
+    </div>
+    <div class="filter-group">
+      <label for="filter-named">Named classes</label>
+      <select id="filter-named">
+        <option value="">All</option>
+        <option value="true">Has a nickname</option>
+        <option value="false">No nickname</option>
+      </select>
     </div>
     <button class="btn" onclick="applyFilters()">Filter</button>
     <button class="btn btn-ghost" onclick="resetFilters()">Reset</button>
@@ -317,9 +325,11 @@ function applyFilters() {
   const rank = document.getElementById('filter-rank').value;
   const open = document.getElementById('filter-open').value;
   const dynkin = document.getElementById('filter-dynkin').value.trim();
+  const named = document.getElementById('filter-named').value;
   if (rank)      filters.rank = rank;
   if (open)      filters.is_open = open;
   if (dynkin)    filters.dynkin_type = dynkin;
+  if (named)     filters.has_nickname = named;
   applySortAvailability();     // the rank just changed which sorts are servable
   currentPage = 1;
   goPage(1);
@@ -329,6 +339,7 @@ function resetFilters() {
   document.getElementById('filter-rank').value = '';
   document.getElementById('filter-open').value = '';
   document.getElementById('filter-dynkin').value = '';
+  document.getElementById('filter-named').value = '';
   filters = {};
   applySortAvailability();
   currentPage = 1;
@@ -360,8 +371,24 @@ async function loadRankSizes() {
     const st = await (await fetch(`${API}/stats`)).json();
     rowsByRank = Object.fromEntries((st.by_rank || []).map(r => [String(r.n), r.distinct_quivers]));
     totalRows = st.distinct_quivers || 0;
-  } catch (e) { console.error('rank sizes unavailable; leaving all sorts enabled', e); }
+    fillRankOptions(st.by_rank || []);
+  } catch (e) { console.error('/stats unavailable; menus left as-is', e); }
   applySortAvailability();
+}
+
+/**
+ * Rank options come from the data, never from a literal list. Each is labelled
+ * with its row count, which is genuinely useful here: the ranks differ by four
+ * orders of magnitude, and "6 — 42,514,454" tells you before you click that
+ * this is the big one.
+ */
+function fillRankOptions(byRank) {
+  const sel = document.getElementById('filter-rank');
+  if (!sel || !byRank.length) return;
+  const keep = sel.value;
+  sel.innerHTML = '<option value="">All ranks</option>'
+    + byRank.map(r => `<option value="${r.n}">${r.n} — ${Number(r.distinct_quivers).toLocaleString()}</option>`).join('');
+  sel.value = keep;
 }
 
 /** Rows the current cut can touch — the filtered rank, or the whole census. */
