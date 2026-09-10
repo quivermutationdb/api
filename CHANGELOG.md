@@ -33,6 +33,12 @@ tell whether that state still holds. Two rules follow:
   of any kind, automatic Dynkin/surface label or curated nickname (61 classes).
   **`has_nickname`** is the narrower curated set (21).
 - **`total_is_lower_bound`** on list responses (see below).
+- **`label`** appended to the export columns (`/api/export`, `/api/export.ndjson`
+  and the bulk corpus). It is the class's automatic Dynkin/surface name, and
+  without it 33 of the 49 named classes — every surface class, 5,254 quivers —
+  exported as `dynkin_type: null, nickname: null` and read as unnamed. The three
+  name fields are nested: `dynkin_type` (16 classes) ⊂ `label` (49), alongside
+  `nickname` (21). Appended, never inserted: CSV consumers index by position.
 - **`get_bulk_corpus`** MCP tool.
 
 ### Changed
