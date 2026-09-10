@@ -285,31 +285,40 @@ const st = await json("/stats");
       "detail" in await idx.json());
   } else {
     const m = await idx.json();
-    check("bulk: index lists a file per rank with rows, size and checksum",
+    check("bulk: index lists every rank with rows, size, parts and checksum",
       Array.isArray(m.ranks) && m.ranks.length > 0
-        && m.ranks.every((p) => p.file && p.rows > 0 && p.bytes_gz > 0 && p.sha256_ndjson));
+        && m.ranks.every((p) => p.rows > 0 && p.bytes_gz > 0 && p.sha256_ndjson
+          && Array.isArray(p.parts) && p.parts.length > 0
+          && p.parts.every((f) => f.file && f.rows > 0 && f.sha256_gz && f.sha256_ndjson)));
+    check("bulk: part rows sum to the rank's rows",
+      m.ranks.every((p) => p.parts.reduce((a, f) => a + f.rows, 0) === p.rows));
+    // Every part must fit `wrangler r2 object put`, or the corpus cannot be
+    // published without S3 credentials -- which is why parts exist at all.
+    check("bulk: no part exceeds the 315 MB upload ceiling",
+      m.ranks.every((p) => p.parts.every((f) => f.bytes_gz < 315 * 1024 * 1024)));
     check("bulk: total_rows agrees with /stats", m.total_rows === st.distinct_quivers,
       `${m.total_rows} vs ${st.distinct_quivers}`);
     check("bulk: columns match the API's export columns",
       JSON.stringify(m.columns) === JSON.stringify(EXPORT_COLUMNS_EXPECTED));
 
     const one = m.ranks[0];
-    const r = await get(`/bulk/${one.file}`);
+    const onePart = one.parts[0];
+    const r = await get(`/bulk/${onePart.file}`);
     check("bulk: file served as a gzip attachment, not a decompressed stream",
       r.headers.get("content-type") === "application/gzip"
-        && (r.headers.get("content-disposition") ?? "").includes(one.file)
+        && (r.headers.get("content-disposition") ?? "").includes(onePart.file)
         && r.headers.get("content-encoding") === null);
     const bytes = new Uint8Array(await r.arrayBuffer());
     check("bulk: body really is gzip (magic 1f 8b)", bytes[0] === 0x1f && bytes[1] === 0x8b);
     const unzipped = new TextDecoder().decode(
       await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"))).arrayBuffer());
     const lines = unzipped.trim().split("\n");
-    check("bulk: line count matches the manifest", lines.length === one.rows,
-      `${lines.length} vs ${one.rows}`);
+    check("bulk: line count matches the manifest", lines.length === onePart.rows,
+      `${lines.length} vs ${onePart.rows}`);
     const digest = [...new Uint8Array(await crypto.subtle.digest("SHA-256",
       new TextEncoder().encode(unzipped)))].map((b) => b.toString(16).padStart(2, "0")).join("");
     check("bulk: sha256 of the uncompressed content matches the manifest",
-      digest === one.sha256_ndjson);
+      digest === onePart.sha256_ndjson);
 
     // The corpus and the API must not drift: same row, same bytes.
     const fromBulk = JSON.parse(lines[0]);
@@ -321,7 +330,7 @@ const st = await json("/stats");
 
     check("bulk: range request returns 206 with Content-Range",
       await (async () => {
-        const rr = await fetch(`${BASE}/bulk/${one.file}`, { headers: { Range: "bytes=0-9" } });
+        const rr = await fetch(`${BASE}/bulk/${onePart.file}`, { headers: { Range: "bytes=0-9" } });
         return rr.status === 206 && (rr.headers.get("content-range") ?? "").startsWith("bytes 0-9/");
       })());
   }

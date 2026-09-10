@@ -23,8 +23,13 @@ import { Unavailable } from "./errors";
 
 export const bulkRoutes = new Hono<{ Bindings: Env }>();
 
-/** Corpus filenames only. Anything else is a 404 before R2 is touched. */
-const FILE = /^(?:qmd-n\d+\.ndjson\.gz|manifest\.json|rank_stats\.json|nicknames\.json)$/;
+/**
+ * Corpus filenames only; anything else 404s before R2 is touched. A rank is one
+ * file when it fits, or numbered parts when it does not (rank 6 is ~1.3 GB) --
+ * each part is an independent gzip member, so `cat qmd-n6.part*.ndjson.gz |
+ * gunzip` reads the rank as one stream.
+ */
+const FILE = /^(?:qmd-n\d+(?:\.part\d+)?\.ndjson\.gz|manifest\.json|rank_stats\.json|nicknames\.json)$/;
 
 function bucket(env: Env): R2Bucket {
   const b = env.BULK;
@@ -48,7 +53,9 @@ bulkRoutes.get("/bulk", async (c) => {
     base_url: new URL("/api/bulk/", c.req.url).toString(),
     usage: {
       one_rank: "curl -O https://quivermutationdb.org/api/bulk/qmd-n4.ndjson.gz",
-      verify: "gunzip -c qmd-n4.ndjson.gz | shasum -a 256   # compare with sha256_ndjson",
+      split_rank: "for f in $(curl -s .../api/bulk | jq -r '.ranks[]|select(.rank==6).parts[].file'); "
+        + "do curl -O https://quivermutationdb.org/api/bulk/$f; done",
+      verify: "cat qmd-n6.part*.ndjson.gz | gunzip | shasum -a 256   # compare with the rank's sha256_ndjson",
       read: "gunzip -c qmd-n4.ndjson.gz | jq -c 'select(.mutation_finite == true)'",
       resumable: "curl -C - -O <url>   # Range requests are supported",
     },

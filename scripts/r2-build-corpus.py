@@ -143,8 +143,20 @@ def row_to_obj(f: list) -> dict:
     }
 
 
+# `wrangler r2 object put` refuses anything over 315 MB, and rank 6 is ~1.3 GB
+# compressed. Parts avoid needing S3 credentials just to publish, and they are
+# better for the reader anyway: parallel and individually resumable downloads.
+#
+# Each part is an INDEPENDENT gzip member, so both of these work:
+#   gunzip -c qmd-n6.part03.ndjson.gz          # read one part alone
+#   cat qmd-n6.part*.ndjson.gz | gunzip        # read the rank as one stream
+# because gzip decoders treat concatenated members as a single stream. A part
+# also never splits a line, so every part is valid NDJSON by itself.
+PART_TARGET_BYTES = 250 * 1024 * 1024
+
+
 def build_rank(n: int, out_dir: str, database: str, host: str) -> dict:
-    path = os.path.join(out_dir, f"qmd-n{n}.ndjson.gz")
+    stem = f"qmd-n{n}"
     # -q, or psql echoes "SET" onto stdout as a line with no tab in it and the
     # first row parses as garbage. statement_timeout = 0 because the role
     # carries a 10 s cap for the API's protection; a full-rank COPY is exactly
@@ -155,40 +167,84 @@ def build_rank(n: int, out_dir: str, database: str, host: str) -> dict:
     if host:
         cmd[1:1] = ["-h", host]
     rows = 0
-    sha = hashlib.sha256()
-    with subprocess.Popen(cmd, stdout=subprocess.PIPE, text=True, bufsize=1 << 20) as proc, \
-            open(path, "wb") as raw:
+    sha = hashlib.sha256()          # over the whole rank's uncompressed content
+    parts: list[dict] = []
+    raw = gz = None
+    part_sha = None
+    part_rows = 0
+
+    def open_part():
+        nonlocal raw, gz, part_sha, part_rows
+        name = f"{stem}.ndjson.gz" if PART_TARGET_BYTES <= 0 else \
+               f"{stem}.part{len(parts) + 1:02d}.ndjson.gz"
+        raw = open(os.path.join(out_dir, name), "wb")
         # mtime=0: the gzip header otherwise embeds a timestamp, so the same
         # data would produce a different sha256 on every run and the manifest
         # could not be used to tell "unchanged" from "regenerated".
-        with gzip.GzipFile(fileobj=raw, mode="wb", compresslevel=6, mtime=0) as gz:
-            for line in proc.stdout:
-                line = line.rstrip("\n")
-                if not line:
-                    continue
-                fields = [unescape(v) for v in line.split("\t")]
-                blob = (json.dumps(row_to_obj(fields), separators=(",", ":"),
-                                   ensure_ascii=False) + "\n").encode("utf-8")
-                gz.write(blob)
-                sha.update(blob)
-                rows += 1
-                if rows % 1_000_000 == 0:
-                    print(f"    rank {n}: {rows:,}", flush=True)
+        gz = gzip.GzipFile(fileobj=raw, mode="wb", compresslevel=6, mtime=0)
+        part_sha, part_rows = hashlib.sha256(), 0
+        return name
+
+    def close_part(name):
+        gz.close()
+        raw.close()
+        path = os.path.join(out_dir, name)
+        parts.append({
+            "file": name,
+            "rows": part_rows,
+            "bytes_gz": os.path.getsize(path),
+            "sha256_gz": hashlib.sha256(open(path, "rb").read()).hexdigest(),
+            "sha256_ndjson": part_sha.hexdigest(),
+        })
+
+    name = open_part()
+    with subprocess.Popen(cmd, stdout=subprocess.PIPE, text=True, bufsize=1 << 20) as proc:
+        for line in proc.stdout:
+            line = line.rstrip("\n")
+            if not line:
+                continue
+            fields = [unescape(v) for v in line.split("\t")]
+            blob = (json.dumps(row_to_obj(fields), separators=(",", ":"),
+                               ensure_ascii=False) + "\n").encode("utf-8")
+            gz.write(blob)
+            sha.update(blob)
+            part_sha.update(blob)
+            rows += 1
+            part_rows += 1
+            # Roll over on the COMPRESSED size, which is what the uploader
+            # cares about. flush() so raw.tell() reflects what has actually
+            # been written rather than what is still in the deflate buffer;
+            # the boundary lands between lines either way.
+            if rows % 50_000 == 0:
+                gz.flush()
+                if raw.tell() >= PART_TARGET_BYTES:
+                    close_part(name)
+                    name = open_part()
+            if rows % 1_000_000 == 0:
+                print(f"    rank {n}: {rows:,}", flush=True)
         if proc.wait() != 0:
             raise SystemExit(f"psql failed for rank {n}")
-    size = os.path.getsize(path)
-    print(f"  rank {n}: {rows:,} rows -> {os.path.basename(path)} "
-          f"({size / 1e6:.1f} MB gz)", flush=True)
+    close_part(name)
+
+    # A single part keeps the plain name: no reason to make rank 3 look sharded.
+    if len(parts) == 1:
+        old_name = parts[0]["file"]
+        new_name = f"{stem}.ndjson.gz"
+        os.replace(os.path.join(out_dir, old_name), os.path.join(out_dir, new_name))
+        parts[0]["file"] = new_name
+
+    total = sum(p["bytes_gz"] for p in parts)
+    shown = parts[0]["file"] if len(parts) == 1 else f"{len(parts)} parts"
+    print(f"  rank {n}: {rows:,} rows -> {shown} ({total / 1e6:.1f} MB gz)", flush=True)
     return {
-        "file": os.path.basename(path),
         "rank": n,
         "rows": rows,
-        "bytes_gz": size,
-        # sha256 of the UNCOMPRESSED ndjson: gzip output can vary with zlib
-        # version, the content cannot, so this is what a user can verify.
+        "bytes_gz": total,
+        # sha256 of the UNCOMPRESSED ndjson for the WHOLE rank: gzip bytes vary
+        # with zlib version, the content does not, so this is what a reader can
+        # verify -- `cat parts | gunzip | shasum -a 256`.
         "sha256_ndjson": sha.hexdigest(),
-        "sha256_gz": hashlib.sha256(open(path, "rb").read()).hexdigest()
-        if size < 500_000_000 else None,
+        "parts": parts,
     }
 
 
@@ -238,6 +294,7 @@ def main() -> int:
         "order": "rank ascending, then id order within a rank",
         "total_rows": sum(p["rows"] for p in parts),
         "total_bytes_gz": sum(p["bytes_gz"] for p in parts),
+        "files": [f["file"] for p in parts for f in p["parts"]],
         "ranks": parts,
         "aux": aux,
         "notes": [
@@ -248,6 +305,9 @@ def main() -> int:
             "The census holds connected quivers only.",
             "sha256_ndjson is of the UNCOMPRESSED content: gunzip and hash to "
             "verify, since gzip bytes can differ between zlib versions.",
+            "A rank split into parts: each part is an independent gzip member "
+            "and valid NDJSON on its own, and `cat qmd-nK.part*.ndjson.gz | "
+            "gunzip` reads the whole rank as one stream.",
         ],
     }
     with open(os.path.join(a.out_dir, "manifest.json"), "w", encoding="utf-8") as fh:

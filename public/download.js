@@ -162,12 +162,15 @@
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const m = await r.json();
       const gb = (m.total_bytes_gz / 1e9).toFixed(2);
+      // A large rank ships as numbered parts; each is an independent gzip
+      // member, so the links are listed individually and `cat parts | gunzip`
+      // reads the rank as one stream.
       const rows = m.ranks.map(p => `
         <tr>
           <td class="mono">${p.rank}</td>
           <td class="mono">${Number(p.rows).toLocaleString()}</td>
           <td class="mono">${(p.bytes_gz / 1e6).toFixed(1)} MB</td>
-          <td><a href="/api/bulk/${p.file}">${p.file}</a></td>
+          <td>${p.parts.map(f => `<a href="/api/bulk/${f.file}">${f.file}</a>`).join('<br>')}</td>
         </tr>`).join('');
       body.innerHTML = `
         <p>The complete census as gzipped NDJSON, one file per rank —
@@ -180,8 +183,10 @@
           </table>
         </div>
         <p class="dl-note">
-          Downloads resume (<code>curl -C - -O</code>). Verify with
-          <code>gunzip -c FILE | shasum -a 256</code> against
+          Downloads resume (<code>curl -C - -O</code>). A large rank is split into
+          parts; each is valid on its own and
+          <code>cat qmd-nK.part*.ndjson.gz | gunzip</code> reads the rank as one
+          stream. Verify with <code>gunzip -c FILE | shasum -a 256</code> against
           <code>sha256_ndjson</code> in
           <a href="/api/bulk/manifest.json">manifest.json</a>.
           Also: <a href="/api/bulk/rank_stats.json">rank_stats.json</a> ·
