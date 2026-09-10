@@ -18,6 +18,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { rankStats } from "../db/schema";
 import { createPool, mainDb, withDb } from "../db/shard";
+import { bulkRoutes } from "./bulk";
 import { classesRoutes } from "./classes";
 import { BadRequest, Unavailable, isStatementTimeout } from "./errors";
 import { exportRoutes } from "./export";
@@ -120,6 +121,7 @@ api.route("/quivers", quiversRoutes);
 api.get("/search", listHandler(100));
 api.route("/classes", classesRoutes);
 api.route("/", exportRoutes);          // /export, /export.csv, /export.ndjson
+api.route("/", bulkRoutes);           // /bulk, /bulk/{file}
 api.route("/random", randomRoutes);
 api.route("/nicknames", nicknamesRoutes);
 api.route("/", openapiRoutes);         // /openapi.json

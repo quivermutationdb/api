@@ -106,7 +106,11 @@
   <ul>
     <li><strong>Grow the census.</strong> Extend beyond small ranks to the largest cells that can be
       enumerated exactly, and represent the rest by documented samples
-      <span class="badge badge-dev">in progress</span></li>
+      <span class="badge badge-closed">done</span><br />
+      <span class="rm-note">Ranks 1&ndash;8 are published &mdash; 50,828,164 quivers in
+      327,961 classes. Ranks 1&ndash;6 are exact censuses of their cells; ranks 7 and 8
+      are documented samples, with every mutation-finite class explored explicitly rather
+      than left to the sample to find.</span></li>
     <li>Expand the collection of computed invariants associated with quivers and mutation classes
       <span class="badge badge-closed">done</span></li>
     <li>Provide reproducible code illustrating definitions and computations
@@ -114,7 +118,9 @@
     <li>Track computational provenance and versioning
       <span class="badge badge-closed">done</span></li>
     <li>Make the whole dataset usable by programs and AI assistants, not just by browsers
-      <span class="badge badge-closed">done</span></li>
+      <span class="badge badge-closed">done</span><br />
+      <span class="rm-note">Browse, search, a JSON API, an MCP server for agents, and
+      the whole census as downloadable files at <a href="/api/bulk">/api/bulk</a>.</span></li>
     <li>Mutation-graph navigation (carried from Phase&nbsp;2)
       <span class="badge badge-open">not started</span></li>
   </ul>
@@ -190,7 +196,8 @@
       <pre>GET https://quivermutationdb.org/api/quivers?rank=4&amp;is_acyclic=true&amp;limit=100     # filter/sort/page; follow next_cursor
 GET https://quivermutationdb.org/api/lookup?matrix=[[0,1,0],[-1,0,1],[0,-1,0]]   # any labeling -> canonical id + row
 GET https://quivermutationdb.org/api/classes/by-slug/markov                       # curated names
-GET https://quivermutationdb.org/api/export.ndjson?rank=5&amp;limit=5000           # bulk pull; resume with X-Next-Cursor</pre>
+GET https://quivermutationdb.org/api/export.ndjson?rank=5&amp;limit=5000           # filtered bulk pull; resume with X-Next-Cursor
+GET https://quivermutationdb.org/api/bulk                                        # the WHOLE census as files (use this for everything)</pre>
       <p><strong>Rules that matter:</strong> ids are <code>Q.n{rank}.{hash}</code> / <code>MC.n{rank}.{hash}</code> (hash of the lex-min canonical matrix; <code>b<sub>ij</sub> &gt; 0</code> means <code>b<sub>ij</sub></code> arrows i→j). Semidecidable properties are three-state — <code>true</code>, <code>false</code>, or <code>null</code> = <em>unknown</em>; never read <code>null</code> as "no". <code>mutation_finite</code> is known per quiver even when its class is unexplored (<code>explored: false</code>). The census holds connected quivers only. Definitions of every field: <a href="/wiki.html">/wiki</a>.</p>
       <p><strong>Cite as:</strong> Blake Jackson, <em>Quiver Mutation Database</em>, https://quivermutationdb.org (CC-BY-4.0). Please include the quiver or class ids you used.</p>
     </div>

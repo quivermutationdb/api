@@ -52,6 +52,17 @@
     }
   ],
 
+  // R2 bucket holding the bulk corpus (gzipped NDJSON per rank + manifest),
+  // served by the Worker at /api/bulk/*. R2 egress is free, which is the whole
+  // point: a full census pull is ~12 GB and PlanetScale bills egress past
+  // 100 GB/month. Keep the database for browse, R2 for bulk.
+  "r2_buckets": [
+    {
+      "binding": "BULK",
+      "bucket_name": "qmd-bulk"
+    }
+  ],
+
   "observability": {
     "enabled": true
   }

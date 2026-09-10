@@ -17,8 +17,14 @@ census design.
 
 **For agents and scripts:** [`/llms.txt`](https://quivermutationdb.org/llms.txt) ·
 [`/api/openapi.json`](https://quivermutationdb.org/api/openapi.json) ·
-MCP at `https://quivermutationdb.org/mcp` · bulk pulls via
-`/api/export.ndjson` (follow `X-Next-Cursor`). Every list returns `next_cursor`.
+MCP at `https://quivermutationdb.org/mcp` · every list returns `next_cursor`.
+
+**Want the whole dataset?** [`/api/bulk`](https://quivermutationdb.org/api/bulk) —
+the complete census as gzipped NDJSON, one file per rank, sha256-checksummed and
+resumable, with rows byte-for-byte identical to `/api/export.ndjson`. Egress is
+free and no database work is involved, so this is the right route for anything
+approaching a full pull. `/api/export.ndjson` remains the way to take a
+*filtered* cut.
 
 ## Census coverage
 
@@ -143,6 +149,32 @@ scripts/
 └── browser-check.mjs    # Chromium end-to-end page checks
 tests/                   # 128 tests: core, census, invariants, surfaces, export, golden ids
 ```
+
+## Changelog
+
+`CHANGELOG.md` records changes to the **published data and the public API** —
+the things a citation depends on. Ids are frozen and response shapes are
+additive; anything that breaks either gets an entry, an alias table and notice.
+
+## Bulk corpus
+
+`scripts/r2-build-corpus.py` renders the census as one gzipped NDJSON file per
+rank plus a manifest, and `scripts/r2-upload-corpus.sh` publishes it to the
+`qmd-bulk` R2 bucket, which the Worker serves at `/api/bulk/*`.
+
+```bash
+# from a LOCAL copy of the census, not production: ~12 GB of egress otherwise
+psql -d qmd_footprint -f drizzle-pg/0003_rank8_dangling_class_refs.sql
+python scripts/r2-build-corpus.py dist/r2 --database qmd_footprint
+scripts/r2-upload-corpus.sh dist/r2        # token needs "Workers R2 Storage: Edit"
+```
+
+Two invariants worth preserving. The rows are produced to match
+`exportRow`/`EXPORT_COLUMNS` in `src/api/export.ts` exactly — a bulk file that
+disagrees with the API is worse than no bulk file, and `scripts/api-smoke.mjs`
+asserts a row from the corpus equals the same row from `/api/export.ndjson`. And
+the source must carry every release patch (`drizzle-pg/0003`, curated nicknames)
+before it is rendered, or the corpus will disagree with what the site serves.
 
 ## Identifiers
 

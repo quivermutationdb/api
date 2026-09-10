@@ -1205,3 +1205,21 @@ th.sort-unavailable .sort-arrow { opacity: 0.25; }
   line-height: 1.5;
 }
 .wiki-refs b { font-family: var(--mono); font-size: 0.82rem; }
+
+/* --- bulk corpus section inside the download dialog -------------------- */
+.dl-bulk { margin-top: 1rem; border-top: 1px solid var(--rule); padding-top: 0.75rem; }
+.dl-bulk > summary {
+  cursor: pointer; font-family: var(--mono); font-size: 0.78rem;
+  color: var(--accent); padding: 0.25rem 0;
+}
+.dl-bulk > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.dl-bulk-body { margin-top: 0.65rem; font-size: 0.82rem; }
+.dl-bulk-body p { margin: 0.5rem 0; }
+.dl-bulk-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+.dl-bulk-table th, .dl-bulk-table td {
+  text-align: left; padding: 0.3rem 0.5rem; border-bottom: 1px solid var(--rule);
+}
+.dl-bulk-table th { font-family: var(--mono); font-weight: 600; }
+
+/* Inline note under a roadmap deliverable: the detail behind a status badge. */
+.rm-note { display: block; margin-top: 0.3rem; font-size: 0.82rem; color: var(--ink-light); }

@@ -14,6 +14,21 @@
 
 const BASE = process.env.QMD_API ?? "http://127.0.0.1:8787/api";
 
+// EXPORT_COLUMNS from src/api/export.ts, restated so a reorder is caught. The
+// order is a compatibility promise -- CSV consumers index by position -- and
+// the bulk corpus publishes the same list, so all three must agree.
+const EXPORT_COLUMNS_EXPECTED = [
+  "qmd_id", "num_vertices", "exchange_matrix", "representation_type",
+  "max_edge", "is_acyclic", "is_connected", "is_bipartite", "is_abundant",
+  "is_planar", "symmetry_order", "symmetry_name",
+  "mc_id", "dynkin_type", "is_open", "class_size", "labeled_size",
+  "distinct_quiver_count", "merged_orbit_count",
+  "is_finite_confirmed", "is_infinite_confirmed", "is_infinite_expected",
+  "size_of_explored_frontier", "is_mutation_acyclic",
+  "is_banff", "is_louise", "is_p_prime",
+  "exploration", "nickname", "mutation_finite", "explored",
+];
+
 let failures = 0;
 function check(name, cond, extra = "") {
   if (cond) console.log(`  PASS  ${name}`);
@@ -259,6 +274,58 @@ const st = await json("/stats");
   check("ndjson resume completes rank 3", (await r2.text()).trim().split("\n").length === 12 && r2.headers.get("x-next-cursor") === "");
   const full = (await (await get("/export.ndjson")).text()).trim().split("\n");
   check("ndjson full stream = all quivers", full.length === st.distinct_quivers, String(full.length));
+}
+
+// ---- bulk corpus (R2) -------------------------------------------------------
+{
+  const idx = await get("/bulk");
+  if (idx.status === 503) {
+    // Documented state: the Worker is up but nothing has been published yet.
+    check("bulk: unpublished corpus says so and points at the alternative",
+      "detail" in await idx.json());
+  } else {
+    const m = await idx.json();
+    check("bulk: index lists a file per rank with rows, size and checksum",
+      Array.isArray(m.ranks) && m.ranks.length > 0
+        && m.ranks.every((p) => p.file && p.rows > 0 && p.bytes_gz > 0 && p.sha256_ndjson));
+    check("bulk: total_rows agrees with /stats", m.total_rows === st.distinct_quivers,
+      `${m.total_rows} vs ${st.distinct_quivers}`);
+    check("bulk: columns match the API's export columns",
+      JSON.stringify(m.columns) === JSON.stringify(EXPORT_COLUMNS_EXPECTED));
+
+    const one = m.ranks[0];
+    const r = await get(`/bulk/${one.file}`);
+    check("bulk: file served as a gzip attachment, not a decompressed stream",
+      r.headers.get("content-type") === "application/gzip"
+        && (r.headers.get("content-disposition") ?? "").includes(one.file)
+        && r.headers.get("content-encoding") === null);
+    const bytes = new Uint8Array(await r.arrayBuffer());
+    check("bulk: body really is gzip (magic 1f 8b)", bytes[0] === 0x1f && bytes[1] === 0x8b);
+    const unzipped = new TextDecoder().decode(
+      await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"))).arrayBuffer());
+    const lines = unzipped.trim().split("\n");
+    check("bulk: line count matches the manifest", lines.length === one.rows,
+      `${lines.length} vs ${one.rows}`);
+    const digest = [...new Uint8Array(await crypto.subtle.digest("SHA-256",
+      new TextEncoder().encode(unzipped)))].map((b) => b.toString(16).padStart(2, "0")).join("");
+    check("bulk: sha256 of the uncompressed content matches the manifest",
+      digest === one.sha256_ndjson);
+
+    // The corpus and the API must not drift: same row, same bytes.
+    const fromBulk = JSON.parse(lines[0]);
+    const fromApi = JSON.parse((await (await get(
+      `/export.ndjson?rank=${one.rank}&limit=1`)).text()).trim());
+    check("bulk: first row is identical to /export.ndjson",
+      JSON.stringify(fromBulk) === JSON.stringify(fromApi),
+      `${fromBulk.qmd_id} vs ${fromApi.qmd_id}`);
+
+    check("bulk: range request returns 206 with Content-Range",
+      await (async () => {
+        const rr = await fetch(`${BASE}/bulk/${one.file}`, { headers: { Range: "bytes=0-9" } });
+        return rr.status === 206 && (rr.headers.get("content-range") ?? "").startsWith("bytes 0-9/");
+      })());
+  }
+  check("bulk: unknown file 404s", (await get("/bulk/not-a-file.gz", 404)).status === 404);
 }
 
 // ---- openapi, cors, cache ---------------------------------------------------

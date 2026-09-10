@@ -88,6 +88,20 @@ export function createQmdServer(env: Env) {
     } catch (e) { return fail(String((e as Error).message)); }
   });
 
+  server.registerTool("get_bulk_corpus", {
+    description: "Where to download the ENTIRE census as files (gzipped NDJSON per rank, "
+      + "sha256-checksummed, resumable, free egress). Use this instead of paging "
+      + "search_quivers or /export.ndjson when the goal is the whole dataset or a "
+      + "whole rank -- rank 6 alone is 42.5M rows. Returns file names, row counts, "
+      + "sizes and URLs.",
+    inputSchema: {},
+  }, async () => {
+    const obj = await env.BULK?.get("manifest.json");
+    if (!obj) return fail("The bulk corpus is not published yet; use /api/export.ndjson.");
+    const m = await obj.json<Record<string, unknown>>();
+    return json({ ...m, base_url: "https://quivermutationdb.org/api/bulk/" });
+  });
+
   server.registerTool("get_quiver", {
     description: "One quiver by id (Q.n{rank}.{hash}): canonical exchange matrix, invariants, class summary.",
     inputSchema: { id: z.string() },

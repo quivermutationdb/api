@@ -48,9 +48,24 @@ Maintainer: Blake Jackson <jackson@icarm.io>
   every A_n/D_n are named automatically and have no nickname, so prefer
   `has_name` unless you specifically want the hand-curated entries.
 - `GET /api/random/quiver` · `GET /api/random/class`
-- Bulk pull: `GET /api/export.ndjson?rank=4&limit=5000` then follow the
-  `X-Next-Cursor` header until it is empty. Omit `limit` to stream the whole
-  cut. `GET /api/export?...` is the same cut as CSV.
+- Bulk pull, FILTERED cut: `GET /api/export.ndjson?rank=4&limit=5000` then
+  follow the `X-Next-Cursor` header until it is empty. Omit `limit` to stream
+  the whole cut. `GET /api/export?...` is the same cut as CSV.
+- Bulk pull, WHOLE DATABASE: use `GET /api/bulk` instead. The full census is
+  pre-rendered as one gzipped NDJSON file per rank in object storage — no
+  database work, free egress, resumable (`curl -C - -O`), with sha256
+  checksums in the manifest. The rows are byte-for-byte identical to
+  `/api/export.ndjson`. Do not page 50 M rows through the API when you want
+  all of them; download the files.
+
+## What changed, and when
+
+Data and API changes are recorded in the repository's `CHANGELOG.md`
+(<https://github.com/quivermutationdb/api/blob/main/CHANGELOG.md>). Two
+guarantees you can rely on: `Q.*` / `MC.*` identifiers are frozen and never
+re-key for the same object, and response shapes are additive — fields may be
+added, but existing fields do not change meaning or vanish without an entry.
+If you cache results, cache them by id.
 
 ## Semantics you must respect
 

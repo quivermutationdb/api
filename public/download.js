@@ -75,6 +75,15 @@
 
         <p class="dl-note">Email is optional — we use it only to understand who relies on the dataset.</p>
 
+        <!-- The filtered export above is served from the database; this is the
+             whole census as static files from R2. For anything approaching the
+             full dataset this is the right route: no query, resumable, and the
+             checksums let you verify what landed. -->
+        <details class="dl-bulk" id="dl-bulk">
+          <summary>Or download the entire database</summary>
+          <div id="dl-bulk-body" class="dl-bulk-body">Loading…</div>
+        </details>
+
         <div class="dl-actions">
           <button class="btn btn-ghost" type="button" onclick="QMDDownload.close()">Cancel</button>
           <button class="btn" type="button" onclick="QMDDownload.go()">Download</button>
@@ -133,7 +142,58 @@
       b.classList.toggle('active', b.dataset.val === scope));
     updateSub();
     document.getElementById('dl-overlay').hidden = false;
+    const bulk = document.getElementById('dl-bulk');
+    if (bulk && !bulk.dataset.wired) {
+      bulk.dataset.wired = '1';
+      bulk.addEventListener('toggle', () => { if (bulk.open) loadBulk(); });
+    }
     document.getElementById('dl-email').focus();
+  }
+
+  // Fetched once per page, on first open of the section: the manifest is ~5 KB
+  // and changes only at a data release.
+  let _bulkLoaded = false;
+  async function loadBulk() {
+    if (_bulkLoaded) return;
+    _bulkLoaded = true;
+    const body = document.getElementById('dl-bulk-body');
+    try {
+      const r = await fetch('/api/bulk');
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const m = await r.json();
+      const gb = (m.total_bytes_gz / 1e9).toFixed(2);
+      const rows = m.ranks.map(p => `
+        <tr>
+          <td class="mono">${p.rank}</td>
+          <td class="mono">${Number(p.rows).toLocaleString()}</td>
+          <td class="mono">${(p.bytes_gz / 1e6).toFixed(1)} MB</td>
+          <td><a href="/api/bulk/${p.file}">${p.file}</a></td>
+        </tr>`).join('');
+      body.innerHTML = `
+        <p>The complete census as gzipped NDJSON, one file per rank —
+           <b>${Number(m.total_rows).toLocaleString()}</b> rows, ${gb} GB compressed.
+           Rows are exactly what <code>/api/export.ndjson</code> serves.</p>
+        <div class="table-wrap">
+          <table class="dl-bulk-table">
+            <thead><tr><th>Rank</th><th>Rows</th><th>Size</th><th>File</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+        <p class="dl-note">
+          Downloads resume (<code>curl -C - -O</code>). Verify with
+          <code>gunzip -c FILE | shasum -a 256</code> against
+          <code>sha256_ndjson</code> in
+          <a href="/api/bulk/manifest.json">manifest.json</a>.
+          Also: <a href="/api/bulk/rank_stats.json">rank_stats.json</a> ·
+          <a href="/api/bulk/nicknames.json">nicknames.json</a>.
+          Licensed CC-BY-4.0 — please cite.
+        </p>`;
+    } catch (e) {
+      console.error(e);
+      body.innerHTML = `<p class="dl-note">The bulk corpus is unavailable right now.
+        Use <code>/api/export.ndjson</code> (resumable via the
+        <code>X-Next-Cursor</code> header) instead.</p>`;
+    }
   }
 
   function close() {

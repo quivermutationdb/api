@@ -82,5 +82,19 @@ python scripts/nicknames.py --sql dist/nicknames.sql
 "${PSQL[@]}" -f dist/nicknames.sql
 "${PSQL[@]}" -c 'ANALYZE'
 
+# Build a small bulk corpus from what we just loaded and put it in the LOCAL R2
+# simulation, so `npm run test:api` exercises /api/bulk against real objects
+# rather than skipping it. Without this the bulk path would be untested until
+# production, which is where its bugs would then be found.
+echo "==> building the bulk corpus and loading it into local R2"
+CORPUS="${CORPUS:-dist/dev-r2}"
+rm -rf "$CORPUS"
+python scripts/r2-build-corpus.py "$CORPUS" \
+  --database "${PGDATABASE:-qmd}" --host "${PGHOST:-127.0.0.1}"
+for f in "$CORPUS"/*; do
+  npx wrangler r2 object put "qmd-bulk/$(basename "$f")" --file "$f" --local >/dev/null
+done
+echo "    $(ls "$CORPUS" | wc -l | tr -d ' ') objects in local R2"
+
 echo "==> loaded"
 psql -X -tAc "SELECT '    rank ' || n || ': ' || count(*) FROM quivers GROUP BY n ORDER BY n"
